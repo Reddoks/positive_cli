@@ -38,7 +38,6 @@ class iface_MP_AssetQuery:  # noqa
         :param pattern: string
         :param lst: queries list
         :param dct: queries dict
-        :return: group information
         """
         query_list = None
         if pattern:
@@ -84,15 +83,14 @@ class iface_MP_AssetQuery:  # noqa
         Create asset query from specification
         :param raw_spec: specification structure
         :param disarm: run in test mode
-        :return:
         """
         self.logger.debug("Trying to create asset query from specification")
-        # Reload group list
+        # Reload queries list
         response = self.__load_list()
         if not response.state:
             EVENTS.push(status="Fail", action="Create", instance="Query",
                         name=raw_spec["displayName"], instance_id="N/A",
-                        details="MP Task asset query API initialization failed: {}".format(response.message))
+                        details="MP asset query API initialization failed: {}".format(response.message))
             return response
         self.list = response.message
         response = self.__create_from_spec(raw_spec, disarm)
@@ -140,7 +138,7 @@ class iface_MP_AssetQuery:  # noqa
             except KeyboardInterrupt:
                 return MPAPIResponse(state=False, message="Operation interrupted")
             if query_input == "":
-                return MPAPIResponse(state=False, message="Skip group enter")
+                return MPAPIResponse(state=False, message="Skip query enter")
             if query_input == "?":
                 print("Available queries:")
                 print(get_string_from_fmt(query_hierarchy, fmt="yaml"))
@@ -331,14 +329,13 @@ class iface_MP_AssetQuery:  # noqa
         return
 
     @staticmethod
-    def remove_childs(group_list: list) -> list:
+    def remove_childs(queries_list: list) -> list:
         """
         Get list of asset queries without child queries
-        :param group_list: list of queries with childs
-        :return: list of queries without childs
+        :param queries_list: list of queries with childs
         """
         out_list = []
-        for item in group_list:
+        for item in queries_list:
             # Deprecation block
             if "tree_hierarchy" in item:
                 if len(item["tree_hierarchy"]) == 1:
@@ -348,7 +345,7 @@ class iface_MP_AssetQuery:  # noqa
                     continue
             # End deprecation
             parent_is_present = False
-            for itm in group_list:
+            for itm in queries_list:
                 # Deprecation block
                 if "tree_hierarchy" in item:
                     if len(itm["tree_hierarchy"]) == 1:
@@ -447,7 +444,7 @@ class iface_MP_AssetQuery:  # noqa
             if isinstance(struct, str):
                 id_pattern1 = re.compile("([A-Za-z0-9]+(-[A-Za-z0-9]+)+)_root")
                 id_pattern2 = re.compile("[A-Za-z0-9]+")
-                if re.match(id_pattern1, struct) or re.match(id_pattern2, struct):
+                if re.match(id_pattern1, struct) or (re.match(id_pattern2, struct) and len(struct) == 32):
                     hierarchy = self.get_hierarchy(query_id=struct)
                     if hierarchy and struct != spec.get("id"):
                         return [{"id": struct, "kind": "query", "hierarchy": hierarchy}]
@@ -573,6 +570,65 @@ class iface_MP_AssetQuery:  # noqa
                         out_names += child_names
         return out_names, out_hierarchy, out_ids
 
+    def __get_info_by_id(self, query_id: str) -> MPAPIResponse:
+        """
+        Direct get query info from API by ID
+        :param query_id: string ID
+        """
+        from app.mp.mp.iface_mp import ID_refs
+        #out_dict = None
+        try:
+            id_refs = ID_refs(["group", "query"])
+        except KeyboardInterrupt:
+            return MPAPIResponse(state=False, message="Operation interrupted")
+        except BaseException as err:
+            self.logger.error("Failed to initialize reference APIs: {}".format(err))
+            return MPAPIResponse(state=False, message="Failed to initialize reference APIs: {}".format(err))
+        query_info = app.API_MP.get(app.API_MP.url_asset_query_instance.format(query_id))
+        if query_info.state:
+            query_info = query_info.message.json()
+            query_info["isFolder"] = False
+            refs = id_refs.get_references(query_info)
+            if not refs.state:
+                return refs
+            query_info["cli-mixin"] = {
+                "mixin_ref_version": app.MIXIN_REF_VERSION,
+                "kind": "query",
+                "timestamp": str(datetime.datetime.now()),
+                "product": app.API_MP.product,
+                "references_id": refs.message
+            }
+            # If user or common - resolve selection and filter
+            print(query_info.get("type"))
+            print("\n")
+            query_info["test"] = "!!!!!!!!!!!!!!!!"
+            if query_info.get("type") == "user" or query_info.get("type") == "common" or query_info.get("type") == "standard":
+                if query_info.get("filterId"):
+                    filter_pdql = self.get_filter_pdql(query_info.get("filterId"))
+                    if not filter_pdql:
+                        EVENTS.push(status="Fail", action="Resolve", instance="Filter",
+                                    name="N/A", instance_id=query_info.get("filterId"),
+                                    details="Unable to resolve filter "
+                                            "for query: {}".format(query_info.get("displayName")))
+                    else:
+                        query_info["filterId"] = None
+                        query_info["filterPdql"] = filter_pdql
+                if query_info.get("selectionId"):
+                    print("SEL")
+                    print("\n")
+                    selection_pdql = self.get_selection_pdql(query_info.get("selectionId"))
+                    if not selection_pdql:
+                        EVENTS.push(status="Fail", action="Resolve", instance="Selection",
+                                    name="N/A", instance_id=query_info.get["selectionId"],
+                                    details="Unable to resolve selection"
+                                            " for query: {}".format(query_info.get("displayName")))
+                    else:
+                        query_info["selectionId"] = None
+                        query_info["selectionPdql"] = selection_pdql
+            return MPAPIResponse(state=True, message=query_info)
+        else:
+            return MPAPIResponse(state=False, message="Query not found: {}".format(query_id))
+
     def __get_info(self, lst: list, progress: Progress, task: TaskID, user_only: bool) -> MPAPIResponse:
         """
         Get query information
@@ -595,8 +651,15 @@ class iface_MP_AssetQuery:  # noqa
             progress.update(task, advance=1)
             # Getting queue info from list
             list_info = self.get_by_id(query_id=item.get("id"))
-            if user_only and list_info.get("type") != "user" and list_info.get("type") != "common":
+            if not list_info:
+                EVENTS.push(action="Resolve", status="Fail",
+                            instance="Asset Query",
+                            name="N/A", instance_id=item.get("id"),
+                            details="Unable to get info for asset query with ID {}. Asset Query not found."
+                            .format(item.get("id")))
                 continue
+            #if user_only and list_info.get("type") != "user" and list_info.get("type") != "common":
+            #    continue
             # If instance is folder
             if list_info["isFolder"]:
                 query_info = {
@@ -620,6 +683,8 @@ class iface_MP_AssetQuery:  # noqa
                 out_list.append(query_info)
             else:
                 query_info = app.API_MP.get(app.API_MP.url_asset_query_instance.format(item.get("id")))
+                print("HERE")
+                print("\n")
                 if query_info.state:
                     query_info = query_info.message.json()
                     #if query_info.get("parentId"):
@@ -633,16 +698,21 @@ class iface_MP_AssetQuery:  # noqa
                     refs = id_refs.get_references(query_info)
                     if not refs.state:
                         return refs
+                    out_hir = ""
+                    for itm in list_info["tree_hierarchy"]:
+                        out_hir += itm
+                        out_hir += "->"
                     query_info["cli-mixin"] = {
                         "mixin_ref_version": app.MIXIN_REF_VERSION,
                         "kind": "query",
                         "timestamp": str(datetime.datetime.now()),
                         "product": app.API_MP.product,
-                        "hierarchy": list_info.get("tree_hierarchy"),
+                        "hierarchy": out_hir[:-2],
                         "references_id": refs.message
                     }
+                    print(query_info["cli-mixin"])
                     # If user or common - resolve selection and filter
-                    if list_info.get("type") == "user" or list_info.get("type") == "common":
+                    if list_info.get("type") == "user" or list_info.get("type") == "common" or list_info.get("type") == "standard":
                         if query_info.get("filterId"):
                             filter_pdql = self.get_filter_pdql(query_info.get("filterId"))
                             if not filter_pdql:

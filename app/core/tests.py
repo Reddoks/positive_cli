@@ -111,9 +111,23 @@ class ProbeTask:
             if result_context.state_msg == "Core failure":
                 return False, "Core failure"
         # Analyze
-        if result_context.state != step.get("state"):
+        if isinstance(step.get("state"), list):
+            state_list = step.get("state")
+        else:
+            state_list = [step.get("state")]
+        valid = False
+        for item in state_list:
+            if result_context.state == item:
+                valid = True
+        if not valid:
             state = False
             failures.append("Wrong context state: {} instead {}".format(result_context.state, step.get("state")))
+        if "state_msg" in step:
+            if result_context.state_msg:
+                if step.get("state_msg") != result_context.state_msg:
+                    state = False
+                    failures.append("Wrong state message: {} instead {}".format(result_context.state_msg,
+                                                                                step.get("state_msg")))
         if "type" in step:
             if isinstance(step.get("type"), list):
                 value = step.get("type")

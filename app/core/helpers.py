@@ -9,11 +9,12 @@ from sys import exit
 
 from cryptography.fernet import Fernet
 from rich.prompt import Prompt
+from rich import print as rich_print
 
 from app import app
 from app.core.command import Command, CommandContext, core, Variables
 from app.core.func import deep_set, deep_get, get_fmt_data, paged_std_output, validate_pipe, search_in_object, \
-    get_string_from_fmt, get_file_list_by_pattern, LogicValidation
+    get_string_from_fmt, get_file_list_by_pattern, LogicValidation, JSONParse, json_setter, quoted_comma_split
 
 
 # Helpers
@@ -318,6 +319,96 @@ def helper_get(command_context: CommandContext) -> CommandContext:
 
 @Command.validate(validate_pipe)
 @Command.with_options([
+    {"key": "arg", "required": True, "help": "Property path i.e. key1.key2.key3"},
+    {"key": "new", "required": True, "help": "New value to set"},
+    {"key": "old", "required": False, "help": "Old value to replace. Skip this parameter to set value instead replace"},
+])
+@Command.with_name("replace")
+@Command
+def helper_replace(command_context: CommandContext) -> CommandContext:
+    """
+    Helper, works only in pipe
+    Replace or set value on given path
+    """
+
+    def replace_instance(json_object: dict, tgt, old_val, new_val) -> dict | int:
+        # Check property exists
+        parsed_json = JSONParse(source=json_object)
+        prop = parsed_json.get(path_list=[tgt])
+        # Second chance with quotes
+        if not prop:
+            quoted_target = '"' + tgt + '"'
+            prop = parsed_json.get(path_list=[quoted_target])
+            if prop:
+                tgt = quoted_target
+        if not prop and old_val:
+            return -1
+        # Setting new value
+        res = json_object
+        if not old_val:
+            res = json_setter(json_object, tgt, new_val)
+            if res == -1:
+                return -2
+        else:
+            res = json_setter(json_object, tgt, new_val, old_val)
+            if res == -1:
+                return -2
+        return res
+
+    # Check context is list or dict
+    if not isinstance(command_context.context_data, dict | list):
+        return CommandContext(parent=command_context.parent, state=False,
+                              state_msg="Wrong context. Context should be dict or list type.")
+    target_path = command_context.get_arg()
+    if command_context.get_kwarg("old"):
+        value_old = command_context.get_kwarg("old")
+    else:
+        value_old = None
+    value_new = command_context.get_kwarg("new")
+    # Look for lists and quoting
+    if value_old:
+        value_old = quoted_comma_split(value_old)
+    value_new = quoted_comma_split(value_new)
+    if value_old:
+        rich_print("[bright_black]Trying to replace [grey50]{}[bright_black] to [grey50]{} [bright_black]in [grey50]"
+                   "{}".format(value_old, value_new, target_path))
+    else:
+        rich_print("[bright_black]Trying to set [grey50]{}[bright_black] in "
+                   "[grey50]{}".format(value_new, target_path))
+    replace_result = None
+    if isinstance(command_context.context_data, list):
+        replace_result = []
+        for itm in command_context.context_data:
+            result = replace_instance(itm, target_path, value_old, value_new)
+            if result == -1:
+                return CommandContext(parent=command_context.parent, state=False,
+                                      state_msg="Property {} not found or null. You can use '--old=null' "
+                                                "to set this property.".format(target_path))
+            if result == -2:
+                return CommandContext(parent=command_context.parent, state=False,
+                                      state_msg="Unable to set property {}.".format(target_path))
+            if result == -3:
+                return CommandContext(parent=command_context.parent, state=False,
+                                      state_msg="No matched values found for {}.".format(target_path))
+            replace_result.append(result)
+    else:
+        replace_result = replace_instance(command_context.context_data, target_path, value_old, value_new)
+        if replace_result == -1:
+            return CommandContext(parent=command_context.parent, state=False,
+                                  state_msg="Property {} not found or null. You can use '--old=null' "
+                                            "to set this property.".format(target_path))
+        if replace_result == -2:
+            return CommandContext(parent=command_context.parent, state=False,
+                                  state_msg="Unable to set property {}.".format(target_path))
+        if replace_result == -3:
+            return CommandContext(parent=command_context.parent, state=False,
+                                  state_msg="No matched values found for {}.".format(target_path))
+
+    return command_context.instead(context_data=replace_result)
+
+
+@Command.validate(validate_pipe)
+@Command.with_options([
     {"key": "arg", "required": True, "help": "Tuple of property names(paths)"},
 ])
 @Command.with_name("extract")
@@ -327,6 +418,7 @@ def helper_extract(command_context: CommandContext) -> CommandContext:
     Helper, works only in pipe
     Extract selected keys from data structure
     """
+
     def extract_from_dict(k_list: list, source_data: dict) -> dict:
         output = {}
         for key in k_list:
@@ -343,15 +435,21 @@ def helper_extract(command_context: CommandContext) -> CommandContext:
                 if len(dict_result) > 0:
                     output.append(dict_result)
         return output
+
     # Getting keys list
     keys_list = command_context.get_arg().split(",")
-    for idx, item in enumerate(keys_list):
-        keys_list[idx] = item.strip()
-    out_data = None
-    if isinstance(command_context.context_data, list):
-        out_data = extract_from_list(keys_list, command_context.context_data)
-    if isinstance(command_context.context_data, dict):
-        out_data = extract_from_dict(keys_list, command_context.context_data)
+    parsed_json = JSONParse(source=command_context.context_data)
+    out_data = parsed_json.get(path_list=keys_list)
+    # for idx, item in enumerate(keys_list):
+    # parsed_json = JSONParse(source=command_context.context_data)
+    # parsed_json.get_multi(path_list=keys_list))
+    # Get multi
+    # keys_list[idx] = item.strip()
+    # out_data = None
+    # if isinstance(command_context.context_data, list):
+    #    out_data = extract_from_list(keys_list, command_context.context_data)
+    # if isinstance(command_context.context_data, dict):
+    #    out_data = extract_from_dict(keys_list, command_context.context_data)
     return command_context.instead(context_data=out_data, data_fmt="yaml", data_transform="reset")
 
 
@@ -378,6 +476,55 @@ def helper_context(command_context: CommandContext) -> CommandContext:
                                   state_msg="Context: Is empty")
         out_context = app.app.CONTEXT
     return out_context.instead(is_piped=command_context.is_piped)
+
+
+@Command.validate(validate_pipe)
+@Command.with_help("Limit context list")
+@Command.with_name("limit")
+@Command.with_options([
+    {"key": "arg", "required": True, "help": "Number of limit items"},
+    {"key": "offset", "required": False, "help": "Optional set start offset"}
+])
+@Command
+def helper_limit(command_context: CommandContext) -> CommandContext:
+    """
+    Limit context list for N items
+    """
+    def get_frame(raw_list: list, lim: int, off: int) -> list:
+        """
+        Getting dataframe related to offset and limit
+        """
+        out_data = []
+        frame_len = lim
+        if off >= len(raw_list):
+            return []
+        if (off + lim) > len(raw_list):
+            frame_len = len(raw_list) - off
+        for idx_x in range(off, off + frame_len):
+            out_data.append(raw_list[idx_x])
+        return out_data
+
+    limit = command_context.get_arg()
+    offset = app.app.CONTEXT_OFFSET
+    if not limit.isnumeric():
+        return CommandContext(state=False,
+                              state_msg="Argument should be number")
+    limit = int(limit)
+    if command_context.get_kwarg("offset"):
+        kw_offset = command_context.get_kwarg("offset")
+        if not kw_offset.isnumeric():
+            return CommandContext(state=False,
+                                  state_msg="Offset should be number")
+        offset = int(kw_offset)
+    if not isinstance(command_context.context_data, list):
+        return CommandContext(state=False,
+                              state_msg="Applicable only for 'list' context")
+    if offset > len(command_context.context_data):
+        return CommandContext(state=False,
+                              state_msg="Offset is out off range context data")
+    out_list = get_frame(command_context.context_data, limit, offset)
+    app.app.CONTEXT_OFFSET = offset + limit
+    return command_context.instead(context_data=out_list)
 
 
 @Command.validate(validate_pipe)
@@ -734,6 +881,7 @@ def helper_sort(command_context: CommandContext) -> CommandContext:
 core.add(helper_exit)
 core.add(helper_cls)
 core.add(helper_context)
+core.add(helper_limit)
 core.add(helper_first)
 core.add(helper_last)
 core.add(helper_more)
@@ -744,6 +892,7 @@ core.add(helper_find_prop)
 core.add(helper_select)
 core.add(helper_get)
 core.add(helper_extract)
+core.add(helper_replace)
 core.add(helper_export)
 core.add(helper_import)
 core.add(helper_fmt)

@@ -54,11 +54,13 @@ def mp_dashboard_info(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "name", "version", "canAddNewWidget"]
+            #"fields": ["id", "name", "version", "canAddNewWidget"]
+            "fields": ["id"]
         },
         {
             "type": "dict",
-            "fields": ["id", "name", "version", "canAddNewWidget"]
+            #"fields": ["id", "name", "version", "canAddNewWidget"]
+            "fields": ["id"]
         },
         {
             "type": "str"
@@ -187,11 +189,13 @@ def mp_dashboard_delete(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "name", "version", "canAddNewWidget"]
+            #"fields": ["id", "name", "version", "canAddNewWidget"]
+            "fields": ["id"]
         },
         {
             "type": "dict",
-            "fields": ["id", "name", "version", "canAddNewWidget"]
+            #"fields": ["id", "name", "version", "canAddNewWidget"]
+            "fields": ["id"]
         },
         {
             "type": "str"

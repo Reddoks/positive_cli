@@ -4,6 +4,7 @@ import app
 from app.mp.api import MPAPIResponse
 from app.core import deep_get
 from app.mp.iface_pdql import iface_MP_PDQL
+from app.mp.asset.iface_asset_group import iface_MP_Group
 from app.app import EVENTS
 from app.mp.func import func_select_list_item
 from rich.prompt import Prompt
@@ -105,6 +106,68 @@ class iface_MP_Asset:  # noqa
             else:
                 EVENTS.checkout()
                 return MPAPIResponse()
+
+    def member(self, asset_id: str) -> MPAPIResponse:
+        """
+        Get list of groups where asset is member
+        """
+        self.logger.debug("Trying to get groups for asset {}".format(asset_id))
+        query = 'select(@Host, Host.@Id) | filter(Host.@Id = {})'.format(asset_id)
+        self.logger.debug("Trying to get PDQL query: {}".format(query))
+        try:
+            request_object = iface_MP_PDQL(query, filter={"groupIDs": None, "assetIDs": None})
+        except BaseException as err:
+            return MPAPIResponse(state=False,
+                                 message="PDQL query failed: {}".format(err))
+        if not request_object:
+            self.logger.error("Error during PDQL request")
+            return MPAPIResponse(state=False, message="Error during PDQL request")
+        row_count = request_object.get_count().message
+        # Set selector
+        response = app.API_MP.put(app.API_MP.url_pdql_selection_rows.format(request_object.token), data=[1])
+        if not response.state:
+            max_retries = 10
+            super_retries = 2
+            while max_retries > 0 and not response.state:
+                response = app.API_MP.put(app.API_MP.url_pdql_selection_rows.format(request_object.token), data=[1])
+                if not response.state:
+                    max_retries -= 1
+                    time.sleep(2)
+                    # If failed, re-request PDQL
+                    if super_retries > 0:
+                        super_retries -= 1
+                        max_retries = 5
+                        try:
+                            request_object = iface_MP_PDQL(query, filter={"groupIDs": None, "assetIDs": None})
+                        except BaseException as err:
+                            return MPAPIResponse(state=False,
+                                                 message="PDQL query failed: {}".format(err))
+                        if not request_object:
+                            self.logger.error("Error during PDQL request")
+                            return MPAPIResponse(state=False, message="Error during PDQL request")
+            if not response.state:
+                return response
+        # Getting result
+        response = app.API_MP.get(app.API_MP.url_asset_membership_groups.format(request_object.token))
+        if not response.state:
+            return response
+        # Parse response
+        id_list = []
+        for itm in response.message.json():
+            id_list.append({"id": itm.get("groupId")})
+        # Getting group structure
+        try:
+            iface_group = iface_MP_Group()
+        except KeyboardInterrupt:
+            return MPAPIResponse(state=False, message="Operation interrupted")
+        except BaseException as err:
+            return MPAPIResponse(state=False, message="MP group API init failed: {}".format(err))
+        out_list = []
+        for itm in id_list:
+            group_info = iface_group.get_by_id(group_id=itm.get("id"))
+            if group_info:
+                out_list.append(group_info)
+        return MPAPIResponse(state=True, message=out_list)
 
     def get_scopes_list(self) -> MPAPIResponse:
         """
@@ -258,6 +321,9 @@ class iface_MP_Asset:  # noqa
         if not response.state:
             self.logger.error("Asset snapshot load failed: {}".format(response.message))
             return MPAPIResponse(state=False, message="Asset snapshot load failed: {}".format(response.message))
+        if response.message.content == b'':
+            self.logger.error("Asset not found or snapshot is empty for: {}".format(asset_id))
+            return MPAPIResponse(state=False, message="Asset not found or snapshot is empty for: {}".format(asset_id))
         self.logger.debug("Asset snapshot for {} load succeeded".format(asset_id))
         response = response.message
         return MPAPIResponse(state=True, message=response.content)
@@ -331,6 +397,7 @@ class iface_MP_Asset:  # noqa
                       "'Host.@CreationTime'": dt.get("Host.@CreationTime"),
                       "'Host.@UpdateTime'": dt.get("Host.@UpdateTime")}
             return output
+
         out = None
         if isinstance(data, dict):
             out = reduce_asset(data)
@@ -339,6 +406,41 @@ class iface_MP_Asset:  # noqa
             for item in data:
                 out.append(reduce_asset(item))
         return out
+
+    @staticmethod
+    def reduce_member(data):
+        """
+        Asset membership reducer
+        :param data: membership structure
+        """
+        output = None
+        if isinstance(data, list):
+            output = []
+            for item in data:
+                out_item = {
+                    "id": item.get("id"),
+                    "groups": []
+                }
+                for itm in item.get("groups"):
+                    out_item["groups"].append({
+                        "id": itm.get("id"),
+                        "name": itm.get("name"),
+                        "path": itm.get("treePath")
+                    })
+                output.append(out_item)
+        if isinstance(data,dict):
+            out_item = {
+                "id": data.get("id"),
+                "groups": []
+            }
+            for itm in data.get("groups"):
+                out_item["groups"].append({
+                    "id": itm.get("id"),
+                    "name": itm.get("name"),
+                    "path": itm.get("treePath")
+                })
+            output = out_item
+        return output
 
     @staticmethod
     def reduce_passport(data):

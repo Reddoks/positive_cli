@@ -183,9 +183,9 @@ def mp_asset_scan_content(command_context: CommandContext) -> CommandContext:
     except KeyboardInterrupt:
         return CommandContext(state=False, state_msg="Operation interrupted")
     except BaseException as err:
-        mp_asset_scan_list.logger.error("MP asset scan API init failed: {}".format(err))
+        mp_asset_scan_content.logger.error("MP asset scan API init failed: {}".format(err))
         return CommandContext(state=False, state_msg="MP asset scan API init failed: {}".format(err))
-    mp_asset_scan_dump.logger.debug("Run mp asset scan dump")
+    mp_asset_scan_content.logger.debug("Run mp asset scan content")
     valid = command_context.validate([
         {
             "type": "list",

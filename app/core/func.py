@@ -14,7 +14,6 @@ from rich.tree import Tree
 from rich import print as rich_print
 from yaml import dump
 
-
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
@@ -399,16 +398,33 @@ def get_string_from_fmt(data: dict | list, fmt: str, transform=None, is_transfor
             if not isinstance(data_tmp, list):
                 return "Error format output: Wrong data type - expecting list, got {}".format(type(data_tmp))
             csv_out = io.StringIO()
-            writer = csv.writer(csv_out, quoting=csv.QUOTE_NONNUMERIC)
+            writer = csv.writer(csv_out, quoting=csv.QUOTE_NONNUMERIC, delimiter="#")
             count = 0
+            object_out = ""
             for item in data_tmp:
                 if count == 0:
                     header = item.keys()
                     writer.writerow(header)
                     count += 1
-                writer.writerow(item.values())
+                st = ""
+                for tm in item.values():
+                    if tm:
+                        if isinstance(tm, list):
+                            st += tm[0]
+                        else:
+                            st += tm
+                    else:
+                        st += "null"
+                    st += "#"
+                st = st[:-1]
+                writer.writerow(st)
+                st = st.replace("\r", "")
+                st = st.replace("\n", "")
+                object_out += st
+                object_out += "\n"
             output = csv_out.getvalue()
             output = output.replace('\r', '')
+            output = object_out
             # print(output)
         case "list":
             if not isinstance(data, list):
@@ -427,6 +443,7 @@ def get_tabulate_from_dict(dict_list: list, skip=None) -> [list, list]:
     :param skip: list columns to skip
     :return: headers list, rows list
     """
+
     def get_headers(source_list, sk=None):
         hdrs = []
         keys = []
@@ -440,8 +457,8 @@ def get_tabulate_from_dict(dict_list: list, skip=None) -> [list, list]:
                         keys.append(ky)
         return hdrs, keys
 
-    date_pattern = re.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"  # noqa
-                              "[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|([\+-])([01]\d|2[0-3]):?([0-5]\d)?)?")  # noqa
+    date_pattern = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"  # noqa
+                              r"[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|([\+-])([01]\d|2[0-3]):?([0-5]\d)?)?")  # noqa
     if not skip:
         skip = []
     out_list = []
@@ -461,6 +478,7 @@ def get_tabulate_from_dict(dict_list: list, skip=None) -> [list, list]:
         out_list.append(row_list)
     return headers, out_list
 
+
 def get_tabulate_from_dict_old(dict_list: list, skip=None) -> [list, list]:
     """
     Get tabulated data from list of dicts
@@ -468,8 +486,8 @@ def get_tabulate_from_dict_old(dict_list: list, skip=None) -> [list, list]:
     :param skip: list columns to skip
     :return: headers list, rows list
     """
-    date_pattern = re.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"  # noqa
-                              "[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|([\+-])([01]\d|2[0-3]):?([0-5]\d)?)?")  # noqa
+    date_pattern = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"  # noqa
+                              r"[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|([\+-])([01]\d|2[0-3]):?([0-5]\d)?)?")  # noqa
     if not skip:
         skip = []
     out_list = []
@@ -589,7 +607,7 @@ def deep_compare_dict(source_obj: dict | None, path: str, value: any, ignore_cas
         return False
     else:
         if contains:
-            dict_value =str(dict_value)
+            dict_value = str(dict_value)
             if re.search(value, str(dict_value)):
                 return True
         else:
@@ -659,6 +677,7 @@ def deep_get(source: dict | list | str, path: str) -> dict | list | str | None:
     :param path: means key.nested.nested
     :return: value
     """
+
     def get_ignore_case(obj: dict, key: str):
         for im, v in obj.items():
             if im.lower() == key.lower():
@@ -888,7 +907,19 @@ class LogicValidation:
                 if im.get("operator") == "==":
                     value = im["value"]
                     if im["value"][0] == "$":
-                        value = get_var(im["value"])
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(im["value"]))
+                        else:
+                            value = get_var(im["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     if str(value).lower() != "null":
                         # result = deep_compare_dict(source_item, im.get("property"), str(value))
                         result = deep_compare_dict(source_item, im.get("property"), str(value))
@@ -905,7 +936,19 @@ class LogicValidation:
                 if im.get("operator") == "!=":
                     value = im["value"]
                     if im["value"][0] == "$":
-                        value = get_var(im["value"])
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(im["value"]))
+                        else:
+                            value = get_var(im["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     if str(value).lower() != "null":
                         # result = deep_compare_dict(source_item, im.get("property"), str(value))
                         result = deep_compare_dict(source_item, im.get("property"), str(value))
@@ -922,13 +965,158 @@ class LogicValidation:
                 if im.get("operator") == "~=":
                     value = im["value"]
                     if im["value"][0] == "$":
-                        value = get_var(im["value"])
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(im["value"]))
+                        else:
+                            value = get_var(im["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     # result = deep_compare_dict(source_item, im.get("property"), str(value), contains=True)
                     result = deep_compare_dict(source_item, im.get("property"), str(value), contains=True)
                     if not result:
                         primary_result = False
                     else:
                         primary_once = True
+                # List lookups
+                if im.get("operator") == "=@":
+                    value = im["value"]
+                    if im["value"][0] == "$":
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(im["value"])
+                    list_value = deep_get(source_item, im.get("property"))
+                    if isinstance(list_value, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(im.get("property")))
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if not iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                if im.get("operator") == "@=":
+                    value = im["value"]
+                    if im["value"][0] == "$":
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(im["value"])
+                    list_value = deep_get(source_item, im.get("property"))
+                    if isinstance(list_value, list):
+                        iter_result = False
+                        for s_item in list_value:
+                            if s_item == value:
+                                iter_result = True
+                        if not iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if not iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                if im.get("operator") == "!=@":
+                    value = im["value"]
+                    if im["value"][0] == "$":
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(im["value"])
+                    list_value = deep_get(source_item, im.get("property"))
+                    if isinstance(list_value, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(im.get("property")))
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                if im.get("operator") == "@!=":
+                    value = im["value"]
+                    if im["value"][0] == "$":
+                        if "." in im["value"]:
+                            var_name = im["value"].split(".")[0]
+                            var_path = im["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(im["value"])
+                    list_value = deep_get(source_item, im.get("property"))
+                    if isinstance(list_value, list):
+                        iter_result = False
+                        for s_item in list_value:
+                            if s_item == value:
+                                iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
             # If nested logic
             if im.get("kind") == "nested":
                 nested_verdict = self.validate(source_item, logic=im.get("logic"))
@@ -942,7 +1130,19 @@ class LogicValidation:
                 if itm.get("operator") == "==":
                     value = itm["value"]
                     if itm["value"][0] == "$":
-                        value = get_var(itm["value"])
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(itm["value"]))
+                        else:
+                            value = get_var(itm["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     # result = deep_compare_dict(source_item, itm.get("property"), str(value))
                     result = deep_compare_dict(source_item, itm.get("property"), str(value))
                     if not result:
@@ -953,7 +1153,19 @@ class LogicValidation:
                 if itm.get("operator") == "!=":
                     value = itm["value"]
                     if itm["value"][0] == "$":
-                        value = get_var(itm["value"])
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(itm["value"]))
+                        else:
+                            value = get_var(itm["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     # result = deep_compare_dict(source_item, itm.get("property"), str(value))
                     result = deep_compare_dict(source_item, itm.get("property"), str(value))
                     if result:
@@ -964,7 +1176,19 @@ class LogicValidation:
                 if itm.get("operator") == "~=":
                     value = itm["value"]
                     if itm["value"][0] == "$":
-                        value = get_var(itm["value"])
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                            if isinstance(value, list):
+                                rich_print("[yellow] Compared value '{}' is list. Try to use `=@` operator."
+                                           .format(itm["value"]))
+                        else:
+                            value = get_var(itm["value"])
+                    if isinstance(source_item, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(source_item))
                     # result = deep_compare_dict(source_item, itm.get("property"), str(value), contains=True)
                     result = deep_compare_dict(source_item, itm.get("property"), str(value), contains=True)
                     if not result:
@@ -972,6 +1196,140 @@ class LogicValidation:
                     else:
                         alternative_once = True
                         alternative_result = True
+                # List lookups
+                if itm.get("operator") == "=@":
+                    value = itm["value"]
+                    if itm["value"][0] == "$":
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(itm["value"])
+                    list_value = deep_get(source_item, itm.get("property"))
+                    if isinstance(list_value, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(itm.get("property")))
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if not iter_result:
+                            alternative_result = False
+                        else:
+                            alternative_once = True
+                            alternative_result = True
+                if itm.get("operator") == "@=":
+                    value = itm["value"]
+                    if itm["value"][0] == "$":
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(itm["value"])
+                    list_value = deep_get(source_item, itm.get("property"))
+                    if isinstance(list_value, list):
+                        iter_result = False
+                        for s_item in list_value:
+                            if s_item == value:
+                                iter_result = True
+                        if not iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if not iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                if itm.get("operator") == "!=@":
+                    value = itm["value"]
+                    if itm["value"][0] == "$":
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(itm["value"])
+                    list_value = deep_get(source_item, itm.get("property"))
+                    if isinstance(list_value, list):
+                        rich_print("[yellow] Compared property '{}' is list. Try to use `@=` operator."
+                                   .format(itm.get("property")))
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                if itm.get("operator") == "@!=":
+                    value = itm["value"]
+                    if itm["value"][0] == "$":
+                        if "." in itm["value"]:
+                            var_name = itm["value"].split(".")[0]
+                            var_path = itm["value"].replace(var_name + ".", "")
+                            value = get_var(var_name)
+                            value = deep_get(value, var_path)
+                        else:
+                            value = get_var(itm["value"])
+                    list_value = deep_get(source_item, itm.get("property"))
+                    if isinstance(list_value, list):
+                        iter_result = False
+                        for s_item in list_value:
+                            if s_item == value:
+                                iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
+                    else:
+                        if not isinstance(value, list):
+                            value = [value]
+                        iter_result = False
+                        for item in value:
+                            if isinstance(item, list):
+                                for sitm in item:
+                                    if list_value == sitm:
+                                        iter_result = True
+                            else:
+                                if list_value == item:
+                                    iter_result = True
+                        if iter_result:
+                            primary_result = False
+                        else:
+                            primary_once = True
             # If nested logic
             if itm.get("kind") == "nested":
                 nested_verdict = self.validate(source_item, logic=itm.get("logic"))
@@ -1047,6 +1405,34 @@ class LogicValidation:
             if "~=" in item:
                 operation = "~="
                 item_split = item.split("~=")
+                if len(item_split) < 2:
+                    continue
+                prop = item_split[0]
+                value = item_split[1]
+            if "=@" in item:
+                operation = "=@"
+                item_split = item.split("=@")
+                if len(item_split) < 2:
+                    continue
+                prop = item_split[0]
+                value = item_split[1]
+            if "!=@" in item:
+                operation = "!=@"
+                item_split = item.split("!=@")
+                if len(item_split) < 2:
+                    continue
+                prop = item_split[0]
+                value = item_split[1]
+            if "@=" in item:
+                operation = "@="
+                item_split = item.split("@=")
+                if len(item_split) < 2:
+                    continue
+                prop = item_split[0]
+                value = item_split[1]
+            if "@!=" in item:
+                operation = "@!="
+                item_split = item.split("@!=")
                 if len(item_split) < 2:
                     continue
                 prop = item_split[0]
@@ -1175,3 +1561,305 @@ class LogicValidation:
                 continue
             out_string += source_str[idx]
         return out_string, tokens
+
+
+def quoted_comma_split(raw: str) -> [list, str]:
+    """
+    Quote aware string split by comma
+    :param raw: string to split
+    :return: list of items or string
+    """
+
+    def check_quoted(raw_quoted: str) -> str:
+        """
+        Check if string is quoted expression return expression without quotes
+        :param raw_quoted: potential quoted string
+        :return: cleared string
+        """
+        if raw_quoted[0] == '"' or raw_quoted[0] == "'":
+            if raw_quoted[-1] == '"' or raw_quoted[-1] == "'":
+                # Strip quotes and return
+                return raw_quoted[1:-1]
+        # If regular
+        return raw_quoted
+
+    # If not is list
+    if "," not in raw:
+        return check_quoted(raw)
+    # If potential list
+    else:
+        in_quotes = False
+        elements = []
+        expression = ""
+        for idx in range(0, len(raw)):
+            if (raw[idx] == "'" or raw[idx] == '"') and not in_quotes:
+                in_quotes = True
+                continue
+            if (raw[idx] == "'" or raw[idx] == '"') and in_quotes:
+                in_quotes = False
+                continue
+            if raw[idx] == "," and not in_quotes:
+                elements.append(expression.strip())
+                expression = ""
+                continue
+            expression += raw[idx]
+        if expression:
+            elements.append(expression.strip())
+        return elements
+
+
+def quoted_path_split(path: str) -> list:
+    """
+    Quote aware path string split
+    :param path: path string
+    """
+    in_quotes = False
+    out_list = []
+    expression = ""
+    for idx in range(0, len(path)):
+        if path[idx] == "'" and not in_quotes:
+            in_quotes = True
+            continue
+        if path[idx] == '"' and not in_quotes:
+            in_quotes = True
+            continue
+        if path[idx] == "'" and in_quotes:
+            in_quotes = False
+            continue
+        if path[idx] == '"' and in_quotes:
+            in_quotes = False
+            continue
+        if path[idx] == "." and not in_quotes:
+            out_list.append(expression.strip())
+            expression = ""
+            continue
+        expression += path[idx]
+    if expression:
+        out_list.append(expression.strip())
+    return out_list
+
+
+def getch():
+    """
+    Read single character from standard input without echo.
+    """
+    import sys, tty, termios
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+
+
+def json_setter(json_object: dict | list, path: str, value, replace=None) -> [dict | list]:
+    """
+    Set or replace value of JSON property by path
+    :param json_object: JSON like structure
+    :param path: string with path to property like key1.key2.key3
+    :param value: new value, if comma present then will be list type
+    :param replace: optional value to check before set 'value' parameter
+    """
+
+    def assemble_next(path_spl: list) -> str:
+        """
+        Re-assemble next part of path
+        :param path_spl: list of path parts
+        :return: path string
+        """
+        assembled_string = ""
+        for elem in range(1, len(path_spl)):
+            if elem != 1:
+                assembled_string += "."
+            assembled_string += path_spl[elem]
+        return assembled_string
+
+    def compare(list_values, compare_value) -> bool:
+        """
+        Compare given value with list of values.
+        :param list_values: list of values to compare
+        :param compare_value: value
+        :return: true if value present in list
+        """
+        if isinstance(list_values, list):
+            if compare_value in list_values:
+                return True
+        if compare_value == list_values:
+            return True
+        return False
+
+    # Check value contains multiple values
+    if "," in value:
+        value = value.split(",")
+    path_split = quoted_path_split(path)
+    # If it is last step - set target value
+    if len(path_split) == 1:
+        # If replacement
+        if replace:
+            if isinstance(json_object[path_split[0]], list):
+                for item_idx in range(0, len(json_object[path_split[0]])):
+                    if compare(replace, json_object[path_split[0]][item_idx]):
+                        json_object[path_split[0]][item_idx] = value
+            else:
+                if compare(replace, json_object[path_split[0]]):
+                    json_object[path_split[0]] = value
+        else:
+            json_object[path_split[0]] = value
+        return json_object
+    # If not, go down to structure
+    # Check next key exist
+    if not json_object.get(path_split[0]):
+        return -1
+    # If object is dict
+    if isinstance(json_object[path_split[0]], dict):
+        new_struct = json_setter(json_object[path_split[0]], assemble_next(path_split), value, replace)
+        if new_struct == -1:
+            return -1
+        json_object[path_split[0]] = new_struct
+        return json_object
+    # If object is list
+    if isinstance(json_object[path_split[0]], list):
+        # Look is there something
+        if len(json_object[path_split[0]]) == 0:
+            return -1
+        # Iterate all instances
+        result_list = []
+        for item in json_object[path_split[0]]:
+            new_struct = json_setter(item, assemble_next(path_split), value, replace)
+            if new_struct == -1:
+                return -1
+            result_list.append(new_struct)
+        json_object[path_split[0]] = result_list
+        return json_object
+    return -1
+
+
+class JSONParse:
+    """
+    Parse JSON object to data structure with ability to get values by simplified path
+    """
+
+    def __init__(self, source: dict | list):
+        # Init data structure
+        self.data_parsed = None
+        self.data_source = source
+        # Parse data structure
+        if isinstance(source, list):
+            self.data_parsed = []
+            for item in source:
+                if isinstance(item, dict | list):
+                    self.data_parsed.append(JSONParse(source=item))
+        if isinstance(source, dict):
+            self.data_parsed = {}
+            for key, value in source.items():
+                if isinstance(value, dict | list):
+                    self.data_parsed[key] = JSONParse(source=value)
+                else:
+                    self.data_parsed[key] = value
+
+    def get(self, path_list: list) -> [None, list, dict]:
+        """
+        Getting values by path list
+        :param path_list: paths
+        """
+
+        def get_instance_values(instance):
+            o_obj = {}
+            for item in path_list:
+                result = instance.__get_value(path=item)
+                o_obj[item.strip().replace('"', "").replace("'", "")] = result
+            return o_obj
+
+        out_obj = {}
+        if len(path_list) == 0:
+            return None
+        if len(path_list) == 1:
+            if isinstance(self.data_parsed, list):
+                out_obj = []
+                for inst in self.data_parsed:
+                    res = inst.__get_value(path=path_list[0])
+                    if res:
+                        out_obj.append(res)
+            if isinstance(self.data_parsed, dict):
+                out_obj = self.__get_value(path=path_list[0])
+            return out_obj
+        else:
+            if isinstance(self.data_parsed, list):
+                out_obj = []
+                for inst in self.data_parsed:
+                    res = get_instance_values(inst)
+                    out_obj.append(res)
+            if isinstance(self.data_parsed, dict):
+                out_obj = get_instance_values(self)
+        return out_obj
+
+    def __get_value(self, path: list | str | None, struct=None) -> any:
+        """
+        Getting value by path from provided or local structure
+        :param path: path string
+        """
+        if not path:
+            return self.data_source
+        if not struct:
+            struct = self.data_parsed
+        # If last level in path - looking data in current structure
+        if isinstance(path, str):
+            path = quoted_path_split(path)
+        if len(path) == 1:
+            # If structure is substructure
+            if isinstance(struct, JSONParse):
+                return struct.__get_value(path=path)
+            # If structure is dict
+            if isinstance(struct, dict):
+                if path[0] in struct:
+                    if isinstance(struct[path[0]], JSONParse):
+                        return struct[path[0]].__get_value(path=None)
+                    else:
+                        return struct[path[0]]
+            # If structure is list
+            if isinstance(struct, list):
+                out_list = []
+                for item in struct:
+                    if isinstance(item, JSONParse):
+                        sub = item.__get_value(path=path)
+                        if sub:
+                            out_list.append(sub)
+                if len(out_list) == 1:
+                    return out_list[0]
+                else:
+                    return out_list
+        # If not last look deeper
+        else:
+            current_path = path[0]
+            tail_path = path[1:]
+            # Look in current structure
+            if isinstance(struct, JSONParse):
+                return struct.__get_value(path=path)
+            if isinstance(struct, dict):
+                if current_path in struct:
+                    if isinstance(struct[current_path], JSONParse):
+                        return struct[current_path].__get_value(path=tail_path)
+                    else:
+                        return None
+                return None
+            if isinstance(struct, list):
+                out_list = []
+                for item in struct:
+                    if isinstance(item, JSONParse):
+                        sub = item.__get_value(path=path)
+                        if sub:
+                            if isinstance(sub, list):
+                                if len(sub) > 0:
+                                    jn = {}
+                                    for s_item in sub:
+                                        for key, value in s_item.items():
+                                            if key not in jn:
+                                                jn[key] = []
+                                            jn[key].append(value)
+                                    out_list.append(jn)
+                                    continue
+                            else:
+                                out_list.append(sub)
+                return out_list

@@ -1,6 +1,7 @@
 import logging
 import re
 
+import app
 from app.mp.api import MPAPIResponse
 from app.mp.asset.iface_asset_group import iface_MP_Group
 from app.mp.user.iface_user import iface_MP_User
@@ -13,6 +14,7 @@ from app.mp.task.iface_task_dictionary import iface_MP_TaskDictionary
 from app.mp.aec.iface_aec import iface_MP_AEC
 from app.mp.user.iface_user_roles import iface_MP_UserRole
 from app.mp.site.iface_site import iface_MP_Site
+from app.mp.event.iface_event_filter import iface_MP_EventFilter
 
 from rich import print as rich_print
 from rich.prompt import Prompt
@@ -51,6 +53,9 @@ class ID_refs:  # noqa
                 self.iface_aec = iface_MP_AEC()
             if "site" in types:
                 self.iface_site = iface_MP_Site()
+            if "event_filter" in types:
+                if "SIEM" in app.MP_APPS:
+                    self.iface_event_filter = iface_MP_EventFilter()
         except KeyboardInterrupt:
             raise KeyboardInterrupt()
         except BaseException as err:
@@ -94,10 +99,12 @@ class ID_refs:  # noqa
                 id_pattern2 = re.compile("([a-z0-9]+(-[a-z0-9]+)+)_root")
                 id_pattern3 = re.compile("[a-z0-9]+")
                 if re.match(id_pattern3, struct) and len(struct) == 32 and struct != spec.get("id"):
-                    resolved = self.get_resolved_id(source_id=struct)
-                    if not resolved.state:
-                        return resolved
-                    return MPAPIResponse(state=True, message=resolved.message)
+                    # Check is not FQDN
+                    if "." not in struct:
+                        resolved = self.get_resolved_id(source_id=struct)
+                        if not resolved.state:
+                            return resolved
+                        return MPAPIResponse(state=True, message=resolved.message)
                 if re.match(id_pattern2, struct) and len(struct) == 41 and struct != spec.get("id"):
                     resolved = self.get_resolved_id(source_id=struct)
                     if not resolved.state:
@@ -140,62 +147,75 @@ class ID_refs:  # noqa
                                  message="Wrong specification {}. References is missing".format(spec.get("name")))
         reference = spec["cli-mixin"].get("references_id")
         for item in reference:
-            if item.get("kind") == "group":
+            if item.get("kind") == "group" and "group" in self.types:
                 resolved = self.__resolve_group(source_id=item.get("id"), source_hierarchy=item.get("hierarchy"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
                 # Resolve user
-            if item.get("kind") == "user":
-                resolved = self.__resolve_user(source_id=item.get("id"), source_user_login=item.get("user_login"))
+            if item.get("kind") == "user" and "user" in self.types:
+                resolved = self.__resolve_user(source_id=item.get("id"), source_user_login=item.get("user_login"),
+                                               source_user_name=item.get("user_userName"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "user_role":
+            if item.get("kind") == "user_role" and "user_role" in self.types:
                 resolved = self.__resolve_user_role(source_id=item.get("id"),
                                                     source_application=item.get("application"),
                                                     source_name=item.get("name"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "query":
+            if item.get("kind") == "query" and "query" in self.types:
                 resolved = self.__resolve_query(source_id=item.get("id"), source_hierarchy=item.get("hierarchy"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "site":
+            if item.get("kind") == "event_filter" and "event_filter" in self.types:
+                if "SIEM" not in app.MP_APPS:
+                    EVENTS.push(status="Fail", action="Resolve", instance="Event filter",
+                                name=item.get("name"), instance_id="N/A",
+                                details="SIEM Role required")
+                    return MPAPIResponse(state=False,
+                                         message="Event filter {} not resolved. SIEM "
+                                                 "required.".format(item.get("name")))
+                resolved = self.__resolve_event_filter(source_id=item.get("id"), source_hierarchy=item.get("hierarchy"))
+                if not resolved.state:
+                    return resolved
+                item["resolved_id"] = resolved.message
+            if item.get("kind") == "site" and "site" in self.types:
                 resolved = self.__resolve_site(source_id=item.get("id"), source_hierarchy=item.get("hierarchy"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "scope":
+            if item.get("kind") == "scope" and "scope" in self.types:
                 resolved = self.__resolve_scope(source_id=item.get("id"), source_name=item.get("name"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "policy_rule":
+            if item.get("kind") == "policy_rule" and "policy_rule" in self.types:
                 resolved = self.__resolve_policy(source_id=item.get("id"),
                                                  source_name=item.get("name"),
                                                  source_policy=item.get("policy_id"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "credential":
+            if item.get("kind") == "credential" and "credential" in self.types:
                 resolved = self.__resolve_credential(source_id=item.get("id"), source_name=item.get("name"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "profile":
+            if item.get("kind") == "profile" and "profile" in self.types:
                 resolved = self.__resolve_profile(source_id=item.get("id"), source_name=item.get("name"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "dictionary":
+            if item.get("kind") == "dictionary" and "dictionary" in self.types:
                 resolved = self.__resolve_dictionary(source_id=item.get("id"), source_name=item.get("name"))
                 if not resolved.state:
                     return resolved
                 item["resolved_id"] = resolved.message
-            if item.get("kind") == "aec":
+            if item.get("kind") == "aec" and "aec" in self.types:
                 if not drop_aec:
                     resolved = self.__resolve_aec(source_id=item.get("id"), source_name=item.get("name"))
                     if not resolved.state:
@@ -241,6 +261,14 @@ class ID_refs:  # noqa
                         return MPAPIResponse(state=False,
                                              message="Failed to build asset query reference: {}".format(refs.message))
                     references += refs.message
+                case "event_filter":
+                    if "SIEM" in app.MP_APPS:
+                        refs = self.iface_event_filter.get_reference(spec)
+                        if not refs.state:
+                            return MPAPIResponse(state=False,
+                                                 message="Failed to build event filter "
+                                                         "reference: {}".format(refs.message))
+                        references += refs.message
                 case "site":
                     refs = self.iface_site.get_reference(spec)
                     if not refs.state:
@@ -283,9 +311,82 @@ class ID_refs:  # noqa
                         return MPAPIResponse(state=False,
                                              message="Failed to build AEC reference: {}".format(refs.message))
                     references += refs.message
+        # Build unknown instances list
+        refs = self.__get_unknown_refs(spec, references)
+        if not refs.state:
+            return MPAPIResponse(state=False,
+                                 message="Failed to build unknown instances reference: {}".format(refs.message))
+        references += refs.message
+
         return MPAPIResponse(state=True, message=references)
 
-    def __resolve_user(self, source_id: str, source_user_login: str) -> MPAPIResponse:
+    @staticmethod
+    def __get_unknown_refs(spec: dict, refs: list) -> MPAPIResponse:
+        """
+        Look instances missing in references
+        :param refs: refs list
+        :param spec: specification instance
+        """
+
+        def build_originals(reference: list) -> list:
+            out_lst = []
+            for item in reference:
+                is_present = False
+                for itm in out_lst:
+                    if itm.get("id") == item.get("id"):
+                        is_present = True
+                if not is_present:
+                    out_lst.append(item)
+            return out_lst
+
+        def lookup_in_key(struct: any) -> list | None:
+            if isinstance(struct, list):
+                out_lst = []
+                for item in struct:
+                    ins = lookup_in_key(struct=item)
+                    if ins:
+                        out_lst += ins
+                if len(out_lst) == 0:
+                    return
+                else:
+                    return out_lst
+            if isinstance(struct, dict):
+                out_lst = []
+                for ky, vue in struct.items():
+                    ins = lookup_in_key(struct=vue)
+                    if ins:
+                        out_lst += ins
+                if len(out_lst) == 0:
+                    return
+                else:
+                    return out_lst
+            if isinstance(struct, str):
+                id_pattern1 = re.compile("[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+")
+                id_pattern2 = re.compile("([A-Za-z0-9]+(-[A-Za-z0-9]+)+)_root")
+                id_pattern3 = re.compile("[A-Za-z0-9]+")
+                if (re.match(id_pattern1, struct) or re.match(id_pattern2, struct) or
+                        (re.match(id_pattern3, struct) and len(struct) == 32)):
+                    # Check is not FQDN
+                    if "." not in struct:
+                        is_present = False
+                        for ref_itm in refs:
+                            if ref_itm.get("id") == struct:
+                                is_present = True
+                        if not is_present:
+                            return [{"id": struct, "kind": "unknown"}]
+                        else:
+                            return None
+                return
+
+        out_list = []
+        for key, value in spec.items():
+            inst = lookup_in_key(value)
+            if inst:
+                out_list += inst
+        out_list = build_originals(out_list)
+        return MPAPIResponse(state=True, message=out_list)
+
+    def __resolve_user(self, source_id: str, source_user_login=None, source_user_name=None) -> MPAPIResponse:
         """
         Resolve source user reference
         :param source_id: ID string
@@ -299,13 +400,22 @@ class ID_refs:  # noqa
             self.logger.debug("User exists: {}({})".format(exist.get("userName"),
                                                            exist.get("id")))
             return MPAPIResponse(state=True, message=exist.get("id"))
-        resolved = self.iface_user.get_by_login(name=source_user_login)
+        resolved = None
+        # If login
+        if source_user_login:
+            resolved = self.iface_user.get_by_login(name=source_user_login)
+        # Second chance
+        if source_user_name:
+            resolved = self.iface_user.get_by_username(name=source_user_name)
         if resolved:
             self.logger.debug("User resolved: {}({})".format(resolved.get("userName"),
                                                              resolved.get("id")))
             return MPAPIResponse(state=True, message=resolved.get("id"))
         rich_print("[red]Looks problem with resolution user: ", end="")
-        print(source_user_login)
+        if source_user_login:
+            print(source_user_login)
+        else:
+            print(source_user_name)
         rich_print("[yellow]CLI can not find exist user in system according to specification reference")
         rich_print("[yellow]You can replace this user to another, but it can impact functionality")
         try:
@@ -754,6 +864,54 @@ class ID_refs:  # noqa
                         details="Asset query not resolved")
             return MPAPIResponse(state=False,
                                  message="Assets query {} not resolved.".format(source_hierarchy[-1]))
+
+    def __resolve_event_filter(self, source_id: str, source_hierarchy: list) -> MPAPIResponse:
+        """
+        Resolve source event filter reference
+        :param source_id: ID string
+        :param source_hierarchy: Hierarchy list
+        """
+        # Check is exist by ID
+        self.logger.debug("Look for event filter source ID: {}".format(source_id))
+        exist = self.iface_event_filter.get_by_id(source_id)
+        if exist:
+            self.logger.debug("Event filter exists: {}({})".format(exist.get("name"),
+                                                                   exist.get("id")))
+
+            return MPAPIResponse(state=True, message=exist.get("id"))
+        resolved = self.iface_event_filter.get_by_hierarchy(hierarchy=source_hierarchy)
+        if resolved:
+            self.logger.debug("Event filter resolved: {}({})".format(resolved.get("name"),
+                                                                     resolved.get("id")))
+            return MPAPIResponse(state=True, message=resolved.get("id"))
+        rich_print("[red]Looks problem with resolution event filter: ", end="")
+        print(source_hierarchy[-1])
+        rich_print("[yellow]CLI can not find exist event filter in system according to specification reference")
+        rich_print("[yellow]You can replace this event filter to another, but it can impact functionality")
+        try:
+            decision = Prompt.ask("Would you like replace this event filter? ", choices=["y", "n"], default="n")
+        except KeyboardInterrupt:
+            return MPAPIResponse(state=False, message="Operation interrupted")
+        if decision == "y":
+            filter_info = self.iface_event_filter.get_event_filter_picker("Event filter (? for list, "
+                                                                          "wildcards usable): ")
+            if not filter_info.state:
+                EVENTS.push(status="Fail", action="Resolve", instance="Event filter",
+                            name=source_hierarchy[-1], instance_id="N/A",
+                            details="Event filter not resolved")
+                return MPAPIResponse(state=False,
+                                     message="Event filter {} not resolved.".format(source_hierarchy[-1]))
+            else:
+                self.logger.debug(
+                    "Event filter resolved: {}({})".format(filter_info.message.get("name"),
+                                                           filter_info.message.get("id")))
+                return MPAPIResponse(state=True, message=filter_info.message.get("id"))
+        else:
+            EVENTS.push(status="Fail", action="Resolve", instance="Event filter",
+                        name=source_hierarchy[-1], instance_id="N/A",
+                        details="Event filter not resolved")
+            return MPAPIResponse(state=False,
+                                 message="Event filter {} not resolved.".format(source_hierarchy[-1]))
 
     def __resolve_site(self, source_id: str, source_hierarchy: list) -> MPAPIResponse:
         """

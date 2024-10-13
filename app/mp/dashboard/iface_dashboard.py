@@ -12,6 +12,7 @@ from app.core.func import get_keys_from_dict, console_clear_up, fnmatch_ext, get
 from app.mp.api import MPAPIResponse
 from app.mp.func import (func_select_list_item)
 from app.mp.user import iface_MP_User
+from app.mp.asset.iface_asset_query import iface_MP_AssetQuery
 
 
 class iface_MP_Dashboard:  # noqa
@@ -60,7 +61,7 @@ class iface_MP_Dashboard:  # noqa
             if len(dashboard_list) > 5:
                 rich_print("[yellow]It can get some time")
             try:
-                id_refs = ID_refs(["group", "query", "user"])
+                id_refs = ID_refs(["group", "query", "user", "event_filter"])
             except KeyboardInterrupt:
                 return MPAPIResponse(state=False, message="Operation interrupted")
             except BaseException as err:
@@ -75,9 +76,26 @@ class iface_MP_Dashboard:  # noqa
                         return MPAPIResponse(state=False, message="Operation interrupted")
                     if info.state:
                         info = info.message
+                        refined_info = self.__replace_widget_queries(info)
+                        if not refined_info.state:
+                            return refined_info
+                        info = refined_info.message
                         refs = id_refs.get_references(info)
+                        # Looking for series IDs to ignore
+                        ignored_ids = self.__ignore_data_series_ids(info)
                         if not refs.state:
                             return refs
+                        for i in ignored_ids.message:
+                            is_present = False
+                            for ref_idx, value in enumerate(refs.message):
+                                if value.get("id") == i and value.get("kind") == "unknown":
+                                    refs.message[ref_idx]["kind"] = "ignore"
+                                    is_present = True
+                            if not is_present:
+                                refs.message.append({
+                                    "id": i,
+                                    "kind": "ignore"
+                                })
                         info["cli-mixin"] = {
                             "mixin_ref_version": app.MIXIN_REF_VERSION,
                             "kind": "dashboard",
@@ -122,7 +140,7 @@ class iface_MP_Dashboard:  # noqa
                                  message="Dashboard {} exist. Can`t create".format(source_spec.get("name")))
         self.logger.debug("Dashboard {} not exist".format(source_spec.get("name")))
         try:
-            id_refs = ID_refs(["group", "query", "user"])
+            id_refs = ID_refs(["group", "query", "user", "event_filter"])
         except KeyboardInterrupt:
             return MPAPIResponse(state=False, message="Operation interrupted")
         except BaseException as err:
@@ -245,6 +263,52 @@ class iface_MP_Dashboard:  # noqa
                 output["owner"] = iface_user.get_by_id(data.get("ownerId")).get("name")
             output["widgets"] = len(data.get("widgets"))
         return output
+
+    @staticmethod
+    def __ignore_data_series_ids(dashboard_json: dict) -> MPAPIResponse:
+        """
+        Look in refereneces for dashboard and remove dataseries IDs
+        :param dashboard_json: dashboard info
+        """
+        ignored = []
+        if dashboard_json.get("widgets"):
+            for widget in dashboard_json.get("widgets"):
+                if widget.get("settings"):
+                    if widget.get("settings").get("dataSeries"):
+                        for seria in widget.get("settings").get("dataSeries"):
+                            if seria.get("series"):
+                                for s in seria.get("series"):
+                                    if s.get("id") not in ignored:
+                                        ignored.append(s.get("id"))
+        return MPAPIResponse(state=True, message=ignored)
+
+    @staticmethod
+    def __replace_widget_queries(dashboard_json: dict) -> MPAPIResponse:
+        """
+        Look in references for dashboard and replace foreign queries
+        :param dashboard_json: dashboard info
+        """
+        if dashboard_json.get("widgets"):
+            for widget in dashboard_json.get("widgets"):
+                if widget.get("filter"):
+                    if widget["filter"].get("type") == "stored":
+                        raw_query = app.API_MP.get(app.API_MP.url_asset_query_instance
+                                                   .format(widget["filter"].get("id")))
+                        if raw_query.state:
+                            raw_query = raw_query.message.json()
+                            if raw_query.get("type") == "user" or raw_query.get("type") == "common":
+                                if raw_query.get("selectionPdql"):
+                                    del widget["filter"]["id"]
+                                    widget["filter"]["type"] = "pdql"
+                                    widget["filter"]["pdql"] = raw_query.get("selectionPdql")
+                                    #filter_info = app.API_MP.get(app.API_MP.url_asset_query + '/filters/{}'.format(fil_id))
+                                else:
+                                    return MPAPIResponse(state=False, message="No selectionPdql for query: {}"
+                                                         .format(widget["filter"].get("id")))
+                        else:
+                            return MPAPIResponse(state=False, message="Unable to find query: {}"
+                                                 .format(widget["filter"].get("id")))
+        return MPAPIResponse(state=True, message=dashboard_json)
 
     def __get_info(self, dashboard_id) -> MPAPIResponse:
         """

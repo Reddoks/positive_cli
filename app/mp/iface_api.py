@@ -84,6 +84,9 @@ class iface_MP_API(object):  # noqa
                                           "/api/assets_temporal_readmodel/v1/assets_grid/selection/groups")
         self.url_pdql_selection_groups_data = (self.url_base +
                                                "/api/assets_temporal_readmodel/v1/assets_grid/group/data")
+        self.url_pdql_selection_rows = (self.url_base +
+                                        "/api/assets_temporal_readmodel/v1/assets_grid/"
+                                        "selection/rows?pdqlToken={}")
         # Core
         self.url_product = self.url_base + "/api/deployment_configuration/v1/system_info"
         self.url_license = self.url_base + "/api/licensing/v3/licenses"
@@ -153,6 +156,8 @@ class iface_MP_API(object):  # noqa
         self.url_asset_operations_remove = self.url_base + "/api/assets_processing/v1/asset_operations/removeAssets"
         self.url_asset_operations_remove_state = (
                 self.url_base + "/api/assets_processing/v1/asset_operations/removeAssets?operationId={}")
+        self.url_asset_membership_groups = (self.url_base +
+                                            "/api/assets_temporal_readmodel/v1/assets_info/groups?pdqlToken={}")
 
         # Asset scan operations
         self.url_asset_scan = self.url_base + "/api/v1/scans"
@@ -169,37 +174,91 @@ class iface_MP_API(object):  # noqa
         self.url_asset_scan_raw_content = self.url_base + "/api/v1/scans/raw/{}/content"
         self.url_asset_snapshot = self.url_asset_grid + "/api/assets/{}/raw"
 
+        # Asset reachability
+        self.url_asset_reachability = self.url_base + "/api/topology_analyzer/v2/reachability_analyzes"
+        self.url_asset_reachability_state = self.url_asset_reachability + "/{}/state"
+        self.url_asset_reachability_start = self.url_asset_reachability + "/{}/start"
+        self.url_asset_reachability_result = self.url_asset_reachability + "/{}"
+        self.url_asset_reachability_result_sources = (self.url_asset_reachability +
+                                                      "/{}/sources?availability=allowed&limit=50&offset=0")
+        self.url_asset_reachability_result_destinations = (self.url_asset_reachability +
+                                                           "/{}/destinations?availability=allowed&limit=50&offset=0")
+        self.url_asset_reachability_assets = self.url_base + "/api/v1/asset/state/?assetId={}"
+        self.url_asset_reachability_networks = self.url_base + "/api/topology/v2/networks"
+        self.url_asset_reachability_units = self.url_base + "/api/topology_analyzer/v2/reachability_analyzes/{}/units"
+        self.url_asset_reachability_src_protocols = self.url_base + ("/api/topology_analyzer/v2/reachability_analyzes/"
+                                                                     "{}/sources/{}/"
+                                                                     "protocols?availability=allowed&limit=30&offset=0")
+        self.url_asset_reachability_dst_protocols = self.url_base + ("/api/topology_analyzer/v2/reachability_analyzes/"
+                                                                     "{}/destinations/{}/"
+                                                                     "protocols?availability=allowed&limit=30&offset=0")
+        self.url_asset_reachability_src_routes = self.url_base + ("/api/topology_analyzer/v2/reachability_analyzes/"
+                                                                  "{}/sources/{}/"
+                                                                  "protocols/{}/routes/{}?availability=allowed")
+        self.url_asset_reachability_dst_routes = self.url_base + ("/api/topology_analyzer/v2/reachability_analyzes/"
+                                                                  "{}/destinations/{}/"
+                                                                  "protocols/{}/routes/{}?availability=allowed")
+        self.url_asset_reachability_unit_routes = self.url_base + ("/api/topology_analyzer/v2/reachability_analyzes/{}"
+                                                                   "/routes/{}?fromAddress={}&toAddress={}")
+        # Event
+        self.url_event = self.url_base + "/api/v2/events"
+        # Event filter
+        self.url_event_filter_hierarchy = self.url_event + "/filters_hierarchy"
+        self.url_event_filter_instance = self.url_base + "/api/v3/events/filters/{}"
+        self.url_event_filter_folders = self.url_event + "/folders"
+        self.url_event_filter_folder_instance = self.url_event_filter_folders + "/{}"
+        self.url_event_filter = self.url_base + "/api/v3/events/filters"
+
     def connect(self) -> MPAPIResponse:
         """
         Connection to MaxPatrol API method
         """
+        def set_auth_token():
+            self.access_token = response.message.json().get("access_token")
+            self.auth_header = {'Authorization': 'Bearer ' + self.access_token}
+            self.json_auth_header = {
+                'Authorization': 'Bearer ' + self.access_token,
+                'Content-Type': 'application/json'
+            }
+            self.xml_auth_header = {
+                'Authorization': 'Bearer ' + self.access_token,
+                'Content-Type': 'application/xml'
+            }
         data_siem = {"grant_type": "password", "client_id": "mpx", "client_secret": self.client_secret,
                      "scope": "authorization offline_access mpx.api ptkb.api idmgr.api",
                      "response_type": "code id_token token",
                      "username": self.login, "password": self.password}
-        data_vm = {"grant_type": "password", "client_id": "mpx", "client_secret": self.client_secret,
+        data_mpx = {"grant_type": "password", "client_id": "mpx", "client_secret": self.client_secret,
                    "scope": "authorization offline_access mpx.api idmgr.api",
                    "response_type": "code id_token token",
                    "username": self.login, "password": self.password}
-        self.logger.info("MP API trying to get access token (SIEM)")
-        response = self.post(self.url_auth_token, data_siem)
-        self.logger.debug("MP API token request response: {}".format(response))
-        # If SIEM connect failed, try VM only
-        if not response.state:
-            if "invalid_scope" in response.message:
-                response = self.post(self.url_auth_token, data_vm)
+        self.logger.info("MP API trying to get access token (MPX)")
+        response = self.post(self.url_auth_token, data_mpx)
         if not response.state:
             return MPAPIResponse(state=False, message=response.message)
-        self.access_token = response.message.json().get("access_token")
-        self.auth_header = {'Authorization': 'Bearer ' + self.access_token}
-        self.json_auth_header = {
-            'Authorization': 'Bearer ' + self.access_token,
-            'Content-Type': 'application/json'
-        }
-        self.xml_auth_header = {
-            'Authorization': 'Bearer ' + self.access_token,
-            'Content-Type': 'application/xml'
-        }
+        set_auth_token()
+        self.get_products()
+        # If SIEM in licences, reconnect with SIEM
+        if "SIEM" in app.MP_APPS:
+            self.access_token = None
+            self.auth_header = None
+            self.json_auth_header = None
+            self.xml_auth_header = None
+            response = self.post(self.url_auth_token, data_siem)
+            if not response.state:
+                return MPAPIResponse(state=False, message=response.message)
+        #self.logger.info("MP API trying to get access token (SIEM)")
+        #app.MP_APPS = ["SIEM", "VM"]
+        #response = self.post(self.url_auth_token, data_siem)
+        #self.logger.debug("MP API token request response: {}".format(response))
+        # If SIEM connect failed, try VM only
+        #if not response.state:
+        #    if "invalid_scope" in response.message:
+        #        app.MP_APPS = ["VM"]
+        #        response = self.post(self.url_auth_token, data_vm)
+        #if not response.state:
+        #    return MPAPIResponse(state=False, message=response.message)
+        set_auth_token()
         self.logger.info("MP API got access token")
         # Get product version
         response = self.get(self.url_product)
@@ -245,6 +304,10 @@ class iface_MP_API(object):  # noqa
                                  message="[red]Session connect failed. "
                                          "Probably you enter wrong host (e.g. IP instead FQDN)?")
         if response:
+            self.get_products()
+            if len(app.MP_APPS) == 0:
+                return MPAPIResponse(state=False,
+                                     message="[red]No licence information found")
             self.product = response.message.json().get("productVersion")
             self.__check_tested(response.message.json().get("productVersion"))
         return MPAPIResponse()
@@ -258,6 +321,22 @@ class iface_MP_API(object):  # noqa
                 data
             )
         }
+
+    # Extract product codes
+    def get_products(self):
+        app.MP_APPS = []
+        response = self.get(self.url_license)
+        if response:
+            if response.message.json().get("valid"):
+                for lic in response.message.json()["valid"]:
+                    for prod in lic["license"]["productCodes"]:
+                        if prod.upper() not in app.MP_APPS:
+                            app.MP_APPS.append(prod.upper())
+            if response.message.json().get("invalid"):
+                for lic in response.message.json()["invalid"]:
+                    for prod in lic["license"]["productCodes"]:
+                        if prod.upper() not in app.MP_APPS:
+                            app.MP_APPS.append(prod.upper())
 
     def get(self, url: str, req_wait_time=1, retry=0, do_retry=False, params=None) -> MPAPIResponse:
         """
@@ -458,6 +537,14 @@ class iface_MP_API(object):  # noqa
         major_ok = False
         minor_ok = False
         build_ok = False
+        roles_string = ""
+        if len(app.MP_APPS) > 1:
+            roles_string = app.MP_APPS[0]
+            for idx in range(1, len(app.MP_APPS)):
+                roles_string += "," + app.MP_APPS[idx]
+        else:
+            roles_string = app.MP_APPS[0]
+        rich_print("[yellow]Product version is {} ({})".format(version, roles_string))
         for item in app.MP_TESTED:
             if item.get("major") == int(version_split[0]):
                 major_ok = True
@@ -467,17 +554,14 @@ class iface_MP_API(object):  # noqa
                         if itm["min"] <= int(version_split[2]) <= itm["max"]:
                             build_ok = True
         if not major_ok:
-            rich_print("[yellow]Product version is {}".format(version))
             rich_print("[yellow]Major version {} is not tested yet. "
                        "Please be careful and let us know your experience".format(version_split[0]))
             return
         if not minor_ok:
-            rich_print("[yellow]Product version is {}".format(version))
             rich_print("[yellow]Major version in general looks good, but minor version {} is not tested yet. "
                        "Please be careful and let us know your experience".format(version_split[1]))
             return
         if not build_ok:
-            rich_print("[yellow]Product version is {}".format(version))
             rich_print("[yellow]Major and minor version in general looks good, but build version {} is not tested yet. "
                        "Please be careful and let us know your experience".format(version_split[2]))
             return

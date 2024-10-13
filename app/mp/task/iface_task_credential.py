@@ -232,7 +232,7 @@ class iface_MP_TaskCredential: # noqa
         if "cli-mixin" in process_data:
             del process_data["cli-mixin"]
         if not app.app.GLOBAL_DISARM and not disarm:
-            response = app.API_MP.post(app.API_MP.url_credential_login, process_data)
+            response = app.API_MP.post(app.API_MP.url_credential_login.format(""), process_data)
         else:
             return MPAPIResponse(state=False, message="Success - disarmed")
         if not response.state:
@@ -252,7 +252,7 @@ class iface_MP_TaskCredential: # noqa
         if "cli-mixin" in process_data:
             del process_data["cli-mixin"]
         if not app.app.GLOBAL_DISARM and not disarm:
-            response = app.API_MP.post(app.API_MP.url_credential_password, process_data)
+            response = app.API_MP.post(app.API_MP.url_credential_password.format(""), process_data)
         else:
             return MPAPIResponse(state=False, message="Success - disarmed")
         if not response.state:
@@ -272,7 +272,7 @@ class iface_MP_TaskCredential: # noqa
         if "cli-mixin" in process_data:
             del process_data["cli-mixin"]
         if not app.app.GLOBAL_DISARM and not disarm:
-            response = app.API_MP.post(app.API_MP.url_credential_certificate, process_data)
+            response = app.API_MP.post(app.API_MP.url_credential_certificate.format(""), process_data)
         else:
             return MPAPIResponse(state=False, message="Success - disarmed")
         if not response.state:
@@ -292,7 +292,7 @@ class iface_MP_TaskCredential: # noqa
         if "cli-mixin" in process_data:
             del process_data["cli-mixin"]
         if not app.app.GLOBAL_DISARM and not disarm:
-            response = app.API_MP.post(app.API_MP.url_credential_laps, process_data)
+            response = app.API_MP.post(app.API_MP.url_credential_laps.format(""), process_data)
         else:
             return MPAPIResponse(state=False, message="Success - disarmed")
         if not response.state:

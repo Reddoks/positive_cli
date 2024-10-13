@@ -54,7 +54,9 @@ class iface_MP_PDQL:  # noqa
         resp_json = response.message.json()
         if resp_json["isPotentiallySlow"]:
             rich_print("[yellow]PDQL: Potentially slow request")
-        return MPAPIResponse(state=True, message=resp_json.get("token"))
+        # Check token contains plus symbol
+        token = resp_json.get("token")
+        return MPAPIResponse(state=True, message=token)
 
     def get_count(self) -> MPAPIResponse:
         """

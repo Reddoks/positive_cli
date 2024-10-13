@@ -73,7 +73,7 @@ class iface_MP_Template:  # noqa
             if len(template_list) > 5:
                 rich_print("[yellow]It can get some time")
             try:
-                id_refs = ID_refs(["group", "query"])
+                id_refs = ID_refs(["group", "query", "event_filter"])
             except KeyboardInterrupt:
                 return MPAPIResponse(state=False, message="Operation interrupted")
             except BaseException as err:
@@ -134,7 +134,7 @@ class iface_MP_Template:  # noqa
             return MPAPIResponse(state=False, message="Template {} exist. Can`t create".format(source_spec.get("name")))
         self.logger.debug("Template {} not exist".format(source_spec.get("name")))
         try:
-            id_refs = ID_refs(["group", "query"])
+            id_refs = ID_refs(["group", "query", "event_filter"])
         except KeyboardInterrupt:
             return MPAPIResponse(state=False, message="Operation interrupted")
         except BaseException as err:

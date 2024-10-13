@@ -25,7 +25,7 @@ def mp_asset_query(_command_context: CommandContext) -> CommandContext:
 
 
 @Command.validate(validate_mp_connect)
-@Command.with_help("Get asset query list")
+@Command.with_help("Get asset queries list")
 @Command.with_options([
     {"key": "arg", "required": False, "help": "Root query list element ID or name"},
     {"key": "user_only", "required": False, "help": "Get only user queries"}
@@ -95,11 +95,13 @@ def mp_asset_query_info(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            #"fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            "fields": ["id"]
         },
         {
             "type": "dict",
-            "fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            #"fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            "fields": ["id"]
         },
         {
             "type": "str"
@@ -154,7 +156,7 @@ def mp_asset_query_info(command_context: CommandContext) -> CommandContext:
 
 
 @Command.validate([validate_mp_connect, validate_pipe, validate_enable])
-@Command.with_help("Create MaxPatrol Group from specification")
+@Command.with_help("Create MaxPatrol Asset Query from specification")
 @Command.with_name("create")
 @Command
 def mp_asset_query_create(command_context: CommandContext) -> CommandContext:
@@ -230,7 +232,7 @@ def mp_asset_query_create(command_context: CommandContext) -> CommandContext:
     {"key": "arg", "required": False, "help": "Query ID or name"},
     {"key": "quiet", "required": False, "help": "Delete without confirmation"}
 ])
-@Command.with_help("Delete MaxPatrol Query")
+@Command.with_help("Delete asset query")
 @Command.with_name("delete")
 @Command
 def mp_asset_query_delete(command_context: CommandContext) -> CommandContext:
@@ -243,7 +245,8 @@ def mp_asset_query_delete(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            #"fields": ["id", "displayName", "isFolder", "parentId", "type"]
+            "fields": ["id"]
         },
         {
             "type": "str"
@@ -292,6 +295,8 @@ def mp_asset_query_delete(command_context: CommandContext) -> CommandContext:
     if not query_info:
         return CommandContext(state=False, state_msg="No query information found")
     query_info = iface_query.remove_childs(query_info) # noqa
+    #if not query_info:
+    #    return CommandContext(state=False, state_msg="No query information found")
     for item in query_info:
         # Deprecation block
         hierarchy_len = 0
@@ -304,7 +309,7 @@ def mp_asset_query_delete(command_context: CommandContext) -> CommandContext:
             EVENTS.push(status="Fail", action="Delete", instance="Query",
                         name=item.get("displayName"), instance_id="N/A",
                         details="Query {} is built-in. Can`t delete".format(item.get("displayName")))
-            mp_asset_query_delete.logger.debug("Query " + item["displayName"] + " is built-in. Can`t delete")
+            mp_asset_query_delete.logger.debug("Query {} is built-in. Can`t delete".format(item.get("displayName")))
             continue
         if not quiet and not confirm_all:
             try:

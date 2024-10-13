@@ -13,3 +13,4 @@ from app.mp.report import *
 from app.mp.user import *
 from app.mp.dashboard import *
 from app.mp.site import *
+from app.mp.event import *

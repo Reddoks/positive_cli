@@ -1,6 +1,7 @@
 import logging
 import os
 import datetime
+import sys
 from pathlib import Path
 from tinydb import TinyDB, Query
 import tinydb_encrypted_jsonstorage as tae
@@ -15,13 +16,14 @@ import base64
 import app.completer
 from app.core.prompt import Prompt, input_prompt
 from app.core.command import core, CommandContext, Command
-from app.core.func import fmt_std_output, get_string_from_fmt
+from app.core.func import fmt_std_output, get_string_from_fmt, json_setter
 from app.settings.iface_settings import iface_Settings
 
 app.ENABLE_STATUS = ''
 
 app.CONTEXT = None
 app.LAST_CONTEXT = None
+app.CONTEXT_OFFSET = 0
 
 
 def run(args: str) -> None:
@@ -212,21 +214,28 @@ class EncryptedFileHistory(History):
 
         if os.path.exists(self.filename):
             cipher_suite = Fernet(app.SECRET_KEY)
-            with open(self.filename, "rb") as f:
-                for line in f:
-                    line = line[:-1]
-                    decrypted = cipher_suite.decrypt(line)
-                    clear_line = decrypted.decode("utf-8")
-                    cont_split = clear_line.split("\n")
-                    for ln in cont_split:
-                        if ln.startswith("+"):
-                            lines.append(ln[1:])
-                        else:
-                            add()
-                            lines = []
-                add()
+            try:
+                with open(self.filename, "rb") as f:
+                    for line in f:
+                        line = line[:-1]
+                        decrypted = cipher_suite.decrypt(line)
+                        clear_line = decrypted.decode("utf-8")
+                        cont_split = clear_line.split("\n")
+                        for ln in cont_split:
+                            if ln.startswith("+"):
+                                lines.append(ln[1:])
+                            else:
+                                add()
+                                lines = []
+                    add()
+            except BaseException as err:
+                rich_print("[red]Unable to decrypt History database. "
+                           "Probably you entered wrong encryption secret.")
+                print(err)
+                f.close()
+                os._exit(1)
 
-        # Reverse the order, because newest items have to go first.
+# Reverse the order, because newest items have to go first.
         return reversed(strings)
 
     def store_string(self, string: str) -> None:

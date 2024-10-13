@@ -334,6 +334,17 @@ class iface_MP_User:  # noqa
         self.logger.debug("No user found")
         return
 
+    def get_by_username(self, name: str) -> dict | None:
+        """
+        Get user by userName
+        """
+        self.logger.debug("Trying to get user for username: {}".format(name))
+        for user in self.list:
+            if user.get("userName") == name:
+                return user
+        self.logger.debug("No user found")
+        return
+
     def get_by_name(self, name: str) -> dict | None:
         """
         Get user by name
@@ -428,7 +439,10 @@ class iface_MP_User:  # noqa
                 if re.match(id_pattern, struct) and struct != spec.get("id"):
                     user_info = self.get_by_id(user_id=struct)
                     if user_info:
-                        return [{"id": struct, "kind": "user", "user_login": user_info.get("login")}]
+                        if user_info.get("login"):
+                            return [{"id": struct, "kind": "user", "user_login": user_info.get("login")}]
+                        if user_info.get("userName"):
+                            return [{"id": struct, "kind": "user", "user_userName": user_info.get("userName")}]
                 return
 
         out_list = []

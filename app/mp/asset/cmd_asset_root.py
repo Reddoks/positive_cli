@@ -10,7 +10,6 @@ import base64
 from cryptography.fernet import Fernet
 from rich.prompt import Prompt
 
-
 from app.core.command import Command, CommandContext
 from app.mp.cmd_mp import mp
 from app.app import validate_mp_connect, get_string_from_fmt, validate_enable, EVENTS
@@ -235,11 +234,13 @@ def mp_asset_passport(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "dict",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "str"
@@ -278,11 +279,17 @@ def mp_asset_passport(command_context: CommandContext) -> CommandContext:
     # If context - getting IDs from context
     if isinstance(command_context.context_data, list):
         for item in command_context.context_data:
-            if item.get("@Host", {}).get("id"):
-                asset_ids.append(item.get("@Host", {}).get("id"))
+            if item.get("@Host"):
+                if item.get("@Host", {}).get("id"):
+                    asset_ids.append(item.get("@Host", {}).get("id"))
+            elif item.get("id"):
+                asset_ids.append(item.get("id"))
     if isinstance(command_context.context_data, dict):
-        if command_context.context_data.get("@Host", {}).get("id"):
-            asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+        if command_context.context_data.get("@Host"):
+            if command_context.context_data.get("@Host", {}).get("id"):
+                asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+            elif command_context.context_data.get("id"):
+                asset_ids.append(command_context.context_data.get("id"))
     if isinstance(command_context.context_data, str):
         asset_ids.append(command_context.context_data)
     # Getting passports
@@ -295,12 +302,24 @@ def mp_asset_passport(command_context: CommandContext) -> CommandContext:
             progress.update(task, advance=1)
             passport = iface_asset.get_asset_passport(asset_id=item)
             if not passport.state:
+                if "core.assetsInfo.assetsNotExists.error" in passport.message:
+                    EVENTS.push(action="Resolve", status="Fail",
+                                instance="Asset",
+                                name="N/A", instance_id=item,
+                                details="Unable to get passport for asset with ID {}. Asset not found.".format(item))
+                    continue
                 return CommandContext(state=False,
                                       state_msg="Failed to get asset passport: {}".format(passport.message))
-            passports.append(passport.message)
+            else:
+                passports.append(passport.message)
+    EVENTS.checkout()
     console_clear_up(skip_line=True)
-    return command_context.instead(state_msg=True, context_data=passports, data_fmt="table",
-                                   data_transform=iface_asset.reduce_passport, data_islist_transform=True)
+    if len(passports) > 0:
+        return command_context.instead(state_msg=True, context_data=passports, data_fmt="table",
+                                       data_transform=iface_asset.reduce_passport, data_islist_transform=True)
+    else:
+        return CommandContext(state=False,
+                              state_msg="No assets found")
 
 
 @Command.validate([validate_mp_connect, validate_pipe])
@@ -320,11 +339,13 @@ def mp_asset_dump(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "dict",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "str"
@@ -349,11 +370,17 @@ def mp_asset_dump(command_context: CommandContext) -> CommandContext:
     # If context - getting IDs from context
     if isinstance(command_context.context_data, list):
         for item in command_context.context_data:
-            if item.get("@Host", {}).get("id"):
-                asset_ids.append(item.get("@Host", {}).get("id"))
+            if item.get("@Host"):
+                if item.get("@Host", {}).get("id"):
+                    asset_ids.append(item.get("@Host", {}).get("id"))
+            elif item.get("id"):
+                asset_ids.append(item.get("id"))
     if isinstance(command_context.context_data, dict):
-        if command_context.context_data.get("@Host", {}).get("id"):
-            asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+        if command_context.context_data.get("@Host"):
+            if command_context.context_data.get("@Host", {}).get("id"):
+                asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+            elif command_context.context_data.get("id"):
+                asset_ids.append(command_context.context_data.get("id"))
     if isinstance(command_context.context_data, str):
         asset_ids.append(command_context.context_data)
     # Getting passports
@@ -366,54 +393,168 @@ def mp_asset_dump(command_context: CommandContext) -> CommandContext:
             progress.update(task, advance=1)
             snapshot = iface_asset.get_asset_snapshot(asset_id=item)
             if not snapshot.state:
+                if "Asset not found or snapshot is empty for" in snapshot.message:
+                    EVENTS.push(action="Get", status="Fail",
+                                instance="Snapshot",
+                                name="N/A", instance_id=item,
+                                details=snapshot.message)
+                    continue
                 return CommandContext(state=False,
                                       state_msg="Failed to get asset snapshot: {}".format(snapshot.message))
-            snapshots.append({
-                "id": item,
-                "content": snapshot.message
-            })
+            else:
+                snapshots.append({
+                    "id": item,
+                    "content": snapshot.message
+                })
+    EVENTS.checkout()
     console_clear_up(skip_line=True)
-    # Got snapshots, save
-    # Reset file if exist
-    with open(command_context.get_arg(), "w", encoding="utf-8") as _:
-        pass
-    mode = "a"
-    encoding = "utf-8"
-    cipher_suite = None
-    if "encryption" in command_context.get_kwarg():
-        try:
-            source_key = Prompt.ask("Secret key", password=True)
-        except KeyboardInterrupt:
-            return CommandContext(state=False, state_msg="Operation interrupted")
-        code_bytes = source_key.encode("utf-8")
-        secret_key = base64.urlsafe_b64encode(code_bytes.ljust(32)[:32])
-        cipher_suite = Fernet(secret_key)
-        mode = "ab"
-        encoding = None
-    if disarm:
-        return CommandContext(state=True, state_msg="Success - disarmed")
-    for item in snapshots:
-        start_string = "# Asset {}\n".format(item.get("id"))
-        end_string = "# End\n"
-        content = {"content": item.get("content")}
-        content = get_string_from_fmt(content, fmt="yaml")
+    if len(snapshots) > 0:
+        # Got snapshots, save
+        # Reset file if exist
+        with open(command_context.get_arg(), "w", encoding="utf-8") as _:
+            pass
+        mode = "a"
+        encoding = "utf-8"
+        cipher_suite = None
         if "encryption" in command_context.get_kwarg():
-            content = cipher_suite.encrypt(content.encode("utf-8"))
-            start_string = start_string.encode("utf-8")
-            end_string = "\n# End\n".encode("utf-8")
-        try:
-            with open(command_context.get_arg(), mode, encoding=encoding) as file:
-                file.write(start_string)
-                file.write(content)
-                file.write(end_string)
-        except BaseException as err:
-            mp_asset_dump.logger.error(
-                "Export: Failed output to file {}".format(command_context.get_arg()), exc_info=False)
-            mp_asset_dump.logger.debug("Error info: ", exc_info=True)
-            return CommandContext(state=False,
-                                  state_msg="Failed to write file {}: {}".format(command_context.get_arg(), err))
-    mp_asset_dump.logger.debug("Assets dump completed")
-    return CommandContext(state=True)
+            try:
+                source_key = Prompt.ask("Secret key", password=True)
+            except KeyboardInterrupt:
+                return CommandContext(state=False, state_msg="Operation interrupted")
+            code_bytes = source_key.encode("utf-8")
+            secret_key = base64.urlsafe_b64encode(code_bytes.ljust(32)[:32])
+            cipher_suite = Fernet(secret_key)
+            mode = "ab"
+            encoding = None
+        if disarm:
+            return CommandContext(state=True, state_msg="Success - disarmed")
+        for item in snapshots:
+            start_string = "# Asset {}\n".format(item.get("id"))
+            end_string = "# End\n"
+            content = {"content": item.get("content")}
+            content = get_string_from_fmt(content, fmt="yaml")
+            if "encryption" in command_context.get_kwarg():
+                content = cipher_suite.encrypt(content.encode("utf-8"))
+                start_string = start_string.encode("utf-8")
+                end_string = "\n# End\n".encode("utf-8")
+            try:
+                with open(command_context.get_arg(), mode, encoding=encoding) as file:
+                    file.write(start_string)
+                    file.write(content)
+                    file.write(end_string)
+            except BaseException as err:
+                mp_asset_dump.logger.error(
+                    "Export: Failed output to file {}".format(command_context.get_arg()), exc_info=False)
+                mp_asset_dump.logger.debug("Error info: ", exc_info=True)
+                return CommandContext(state=False,
+                                      state_msg="Failed to write file {}: {}".format(command_context.get_arg(), err))
+        mp_asset_dump.logger.debug("Assets dump completed")
+        return CommandContext(state=True)
+    else:
+        return CommandContext(state=False,
+                              state_msg="No assets found")
+
+
+@Command.validate(validate_mp_connect)
+@Command.with_help("Get asset membership")
+@Command.with_options([
+    {"key": "arg", "required": False, "help": "Asset ID or search string"},
+])
+@Command.with_name("member")
+@Command
+def mp_asset_member(command_context: CommandContext) -> CommandContext:
+    """
+    Get asset membership information
+    """
+    valid = command_context.validate([
+        {
+            "type": "list",
+            "fields": [],
+            "some_fields": ["@Host", "id"]
+        },
+        {
+            "type": "dict",
+            "fields": [],
+            "some_fields": ["@Host", "id"]
+        },
+        {
+            "type": "str"
+        },
+        {
+            "type": "none"
+        }
+    ])
+    if not valid:
+        mp_asset_member.logger.error("Context validation failed")
+        return CommandContext(state=False, state_msg="Context validation failed")
+    mp_asset_member.logger.debug("Run mp asset member")
+    try:
+        iface_asset = iface_MP_Asset()
+    except KeyboardInterrupt:
+        return CommandContext(state=False, state_msg="Operation interrupted")
+    except BaseException as err:
+        mp_asset_passport.logger.error("MP asset API init failed: {}".format(err))
+        return CommandContext(state=False, state_msg="MP asset API init failed: {}".format(err))
+    asset_ids = []
+    # If argument
+    if command_context.get_arg():
+        id_pattern = re.compile("[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+")
+        if re.match(id_pattern, command_context.get_arg()):
+            asset_ids.append(command_context.get_arg())
+        else:
+            assets_obj = iface_asset.qsearch(search_str=command_context.get_arg())
+            if not assets_obj.state:
+                return CommandContext(state=False, state_msg="Failed to get assets: {}".format(assets_obj.message))
+            assets = assets_obj.message.get_offset_list(offset=0, limit=50000)
+            if not assets.state:
+                return CommandContext(state=False, state_msg="Failed to get assets: {}".format(assets.message))
+            for asst in assets.message:
+                asset_ids.append(asst.get("@Host", {}).get("id"))
+
+    # If context - getting IDs from context
+    if isinstance(command_context.context_data, list):
+        for item in command_context.context_data:
+            if item.get("@Host"):
+                if item.get("@Host", {}).get("id"):
+                    asset_ids.append(item.get("@Host", {}).get("id"))
+            elif item.get("id"):
+                asset_ids.append(item.get("id"))
+    if isinstance(command_context.context_data, dict):
+        if command_context.context_data.get("@Host"):
+            if command_context.context_data.get("@Host", {}).get("id"):
+                asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+            elif command_context.context_data.get("id"):
+                asset_ids.append(command_context.context_data.get("id"))
+    if isinstance(command_context.context_data, str):
+        asset_ids.append(command_context.context_data)
+    # Getting membership
+    if len(asset_ids) == 0:
+        return CommandContext(state=False, state_msg="No assets found")
+    groups = []
+    with Progress() as progress:
+        task = progress.add_task("Getting asset membership...", total=len(asset_ids))
+        for item in asset_ids:
+            progress.update(task, advance=1)
+            groups_obj = iface_asset.member(asset_id=item)
+            if not groups_obj.state:
+                EVENTS.push(action="Resolve", status="Fail",
+                            instance="Group Membership",
+                            name="N/A", instance_id=item,
+                            details="Unable to get group membership for asset with ID {}.".format(item))
+                continue
+            else:
+                groups.append({
+                    "id": item,
+                    "groups": groups_obj.message
+                })
+    EVENTS.checkout()
+    console_clear_up(skip_line=True)
+    if len(groups) > 0:
+        return command_context.instead(state_msg=True, context_data=groups, data_fmt="yaml",
+                                       data_transform=iface_asset.reduce_member, force_transform=True)
+    else:
+        return CommandContext(state=False,
+                              state_msg="No assets found")
 
 
 @Command.validate([validate_mp_connect, validate_enable])
@@ -600,11 +741,13 @@ def mp_asset_delete(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "dict",
-            "fields": ["@Host"]
+            "fields": [],
+            "some_fields": ["@Host", "id"]
         },
         {
             "type": "str"
@@ -644,11 +787,17 @@ def mp_asset_delete(command_context: CommandContext) -> CommandContext:
     # If context - getting IDs from context
     if isinstance(command_context.context_data, list):
         for item in command_context.context_data:
-            if item.get("@Host", {}).get("id"):
-                asset_ids.append(item.get("@Host", {}).get("id"))
+            if item.get("@Host"):
+                if item.get("@Host", {}).get("id"):
+                    asset_ids.append(item.get("@Host", {}).get("id"))
+            elif item.get("id"):
+                asset_ids.append(item.get("id"))
     if isinstance(command_context.context_data, dict):
-        if command_context.context_data.get("@Host", {}).get("id"):
-            asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+        if command_context.context_data.get("@Host"):
+            if command_context.context_data.get("@Host", {}).get("id"):
+                asset_ids.append(command_context.context_data.get("@Host", {}).get("id"))
+        elif command_context.context_data.get("id"):
+            asset_ids.append(command_context.context_data)
     if isinstance(command_context.context_data, str):
         asset_ids.append(command_context.context_data)
     if command_context.get_kwarg():
@@ -663,6 +812,20 @@ def mp_asset_delete(command_context: CommandContext) -> CommandContext:
     if len(asset_ids) == 0:
         return CommandContext(state=False, state_msg="No assets found")
     for item in asset_ids:
+        # Check IDs
+        id_pattern = re.compile("[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+")
+        if not re.match(id_pattern, str(item)):
+            EVENTS.push(action="Check", status="Fail",
+                        instance="Asset",
+                        name="N/A", instance_id=item,
+                        details="Wrong asset ID: {}".format(item))
+            continue
+        if len(item) != 36:
+            EVENTS.push(action="Check", status="Fail",
+                        instance="Asset",
+                        name="N/A", instance_id=item,
+                        details="Wrong asset ID: {}".format(item))
+            continue
         if not quiet and not confirm_all:
             try:
                 decision = Prompt.ask("Are you sure to delete asset {}? ".format(item),
@@ -691,6 +854,7 @@ mp_asset.add(mp_asset_search)
 mp_asset.add(mp_asset_passport)
 mp_asset.add(mp_asset_dump)
 mp_asset.add(mp_asset_load)
+mp_asset.add(mp_asset_member)
 mp_asset.add(mp_asset_delete)
 mp_asset.add(mp_asset_list)
 mp.add(mp_asset)

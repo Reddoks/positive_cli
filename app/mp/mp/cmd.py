@@ -42,17 +42,7 @@ def mp_info(_command_context: CommandContext) -> CommandContext:
     if not response.state:
         mp_info.logger.error("MaxPatrol information load failed: {}".format(response.message))
         return CommandContext(state=False, state_msg="MaxPatrol information load failed: {}".format(response.message))
-    licenses = {
-        "licenses": {
-            "valid": [],
-            "invalid": []
-        }
-    }
-    for item in response.message.json().get["valid"]:
-        licenses["licenses"]["valid"].append(item)
-    for item in response["message"].json()["invalid"]:
-        licenses["licenses"]["invalid"].append(item)
-    return CommandContext(context_data=licenses, data_fmt="yaml")
+    return CommandContext(context_data=response.message.json(), data_fmt="yaml")
 
 
 @Command.validate([validate_mp_connect, validate_enable])
@@ -153,6 +143,7 @@ def mp_import(command_context: CommandContext) -> CommandContext:
                 spec[kind_key].append(itm)
         return spec
 
+    from app.mp.event.iface_event_filter import iface_MP_EventFilter
     # Looking multiple files
     specs = {}
     disarm = "disarm" in command_context.get_kwarg()
@@ -506,8 +497,44 @@ def mp_import(command_context: CommandContext) -> CommandContext:
                             name=item.get("name"), instance_id=item.get("id"), details=response.message)
                 continue
             print(response.message)
+    if specs.get("event_filter"):
+        try:
+            iface_event_filter = iface_MP_EventFilter()
+        except KeyboardInterrupt:
+            return CommandContext(state=False, state_msg="Operation interrupted")
+        except BaseException as err:
+            mp_import.logger.error("MP event filter API init failed: {}".format(err))
+            return CommandContext(state=False, state_msg="MP event filter API init failed: {}".format(err))
+        for item in specs.get("event_filter"):
+            response = iface_event_filter.create(raw_spec=item, disarm=disarm)
+            if not response.state:
+                if response.message == "Operation interrupted":
+                    return CommandContext(state=False, state_msg="Operation interrupted")
+                mp_import.logger.error("Failed to create event filter {}: {}".format(item.get("name"),
+                                                                                  response.message))
+                rich_print("[red]Failed to create event filter {}: {}".format(item.get("name"),
+                                                                           response.message))
+                EVENTS.push(status="Fail", action="Create", instance="Event filter",
+                            name=item.get("name"), instance_id=item.get("id"), details=response.message)
+                continue
+            print(response.message)
     EVENTS.checkout()
     return CommandContext(state=True, state_msg="Import completed")
+
+
+# Only if MaxPatrol connected
+def validate_siem(_command: Command, _context: CommandContext) -> bool:
+    """
+    SIEM presence validator
+    """
+    if app.MP_APPS:
+        if "SIEM" not in app.MP_APPS:
+            rich_print("[yellow]Can be used only with SIEM deployment")
+            return False
+    else:
+        rich_print("[yellow]API connection required")
+        return False
+    return True
 
 
 mp.add(mp_info)

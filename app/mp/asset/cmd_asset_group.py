@@ -2,6 +2,7 @@ import time
 
 from rich.progress import Progress
 from rich.prompt import Prompt
+from rich import print as rich_print
 
 from app.app import EVENTS
 from app.app import validate_mp_connect, validate_enable
@@ -86,11 +87,13 @@ def mp_asset_group_info(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "name", "groupType", "children", "isRoot"]
+#            "fields": ["id", "name", "groupType", "children", "isRoot"]
+            "fields": ["id"],
         },
         {
             "type": "dict",
-            "fields": ["id", "name", "groupType", "children", "isRoot"]
+#            "fields": ["id", "name", "groupType", "children", "isRoot"]
+            "fields": ["id"]
         },
         {
             "type": "str"
@@ -178,34 +181,33 @@ def mp_asset_group_create(command_context: CommandContext) -> CommandContext:
         return CommandContext(state=False, state_msg="MP group API init failed: {}".format(err))
     # Looking for list of group specs
     if isinstance(command_context.context_data, list):
-        with Progress() as progress:
-            count = len(command_context.context_data)
-            task = progress.add_task("Creating groups...", total=count)
-            for item in command_context.context_data:
-                if item.get("name") == "Root":
-                    continue
-                progress.update(task, advance=1)
-                iface_group.reload()
-                result = iface_group.create(item, disarm=disarm)
-                if not result.state:
-                    if result.message == "Operation interrupted":
-                        return CommandContext(state=False, state_msg="Operation interrupted")
-                    mp_asset_group_create.logger.error("Failed to create group: {}".format(item.get("name")))
-                    mp_asset_group_create.logger.error(result.message)
-                    print(result.message)
-                    continue
-                else:
-                    print("Group {} created".format(item.get("name")))
-        console_clear_up()
+        count = len(command_context.context_data)
+        rich_print("[bright_black]Starting group creation ({} group(s)).".format(count))
+        for item in command_context.context_data:
+            if item.get("name") == "Root":
+                continue
+            iface_group.reload()
+            rich_print("[bright_black]Create group {}.".format(item.get("name")))
+            result = iface_group.create(item, disarm=disarm)
+            if not result.state:
+                if result.message == "Operation interrupted":
+                    return CommandContext(state=False, state_msg="Operation interrupted")
+                mp_asset_group_create.logger.error("Failed to create group: {}".format(item.get("name")))
+                mp_asset_group_create.logger.error(result.message)
+                rich_print("[red]{}".format(result.message))
+                continue
+            else:
+                rich_print("[dark_green]Group {} created".format(item.get("name")))
     else:
+        rich_print("[bright_black]Create group {}.".format(command_context.context_data.get("name")))
         result = iface_group.create(command_context.context_data, disarm=disarm)
         if not result.state:
             mp_asset_group_create.logger.error("Failed to create group: {}"
                                                .format(command_context.context_data.get("name")))
             mp_asset_group_create.logger.error(result.message)
-            print(result.message)
+            rich_print("[red]{}".format(result.message))
         else:
-            print("Group {} created".format(command_context.context_data.get("name")))
+            rich_print("[dark_green]]Group {} created".format(command_context.context_data.get("name")))
     EVENTS.checkout()
     mp_asset_group_create.logger.debug("Group creation complete")
     return CommandContext(state=True)
@@ -230,7 +232,8 @@ def mp_asset_group_delete(command_context: CommandContext) -> CommandContext:
     valid = command_context.validate([
         {
             "type": "list",
-            "fields": ["id", "name", "groupType", "children", "isRoot"]
+            #"fields": ["id", "name", "groupType", "children", "isRoot"]
+            "fields": ["id"]
         },
         {
             "type": "str"

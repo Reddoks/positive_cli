@@ -113,12 +113,14 @@ class Prompt:
                     if app.app.CONTEXT:
                         app.app.LAST_CONTEXT = app.app.CONTEXT
                     app.app.CONTEXT = result_context
+                    app.app.CONTEXT_OFFSET = 0
                     fmt_std_output(result_context)
             else:
                 result_context = core(command_context=CommandContext(tail_string=prompt_text))
                 if app.app.CONTEXT:
                     app.app.LAST_CONTEXT = app.app.CONTEXT
                 app.app.CONTEXT = result_context
+                app.app.CONTEXT_OFFSET = 0
                 fmt_std_output(result_context)
 
 

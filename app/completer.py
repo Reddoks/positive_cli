@@ -21,7 +21,7 @@ NestedDict = Mapping[str, Union[Any, Set[str], None, Completer]]
 class NestedCompleter(Completer):
     """
     Completer which wraps around several other completers, and calls any the
-    one that corresponds with the first word of the input.
+    one that corresponds with the first word of the input.зн
 
     By combining multiple `NestedCompleter` instances, we can achieve multiple
     hierarchical levels of autocompletion. This is useful when `WordCompleter`
@@ -126,6 +126,7 @@ completer = NestedCompleter.from_nested_dict({
     "exit": None,
     "export": None,
     "extract": None,
+    "replace": None,
     "first": None,
     "find": None,
     "find_property": None,
@@ -168,6 +169,7 @@ completer = NestedCompleter.from_nested_dict({
             },
             "list": None,
             "load": None,
+            "reachability": None,
             "passport": None,
             "pdql": None,
             "search": None,
@@ -191,6 +193,14 @@ completer = NestedCompleter.from_nested_dict({
             "delete": None,
             "info": None,
             "list": None
+        },
+        "event": {
+            "filter": {
+                "create": None,
+                "delete": None,
+                "info": None,
+                "list": None
+            }
         },
         "info": None,
         "import": None,

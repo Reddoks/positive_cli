@@ -557,6 +557,57 @@ class CommandContext:
         else:
             return None
 
+    def validate_next(self, rules) -> [bool, str]:
+        """
+        Context validator based on rules
+        :param rules:
+            Example (all cases):
+                valid = command_context.validate({
+                        "must": {
+                            "or": [
+                            ],
+                            "and": [
+                            ],
+                            "struct": {
+                                "type": "dict",
+                                "fields": [],
+                                "validate": {
+                                    "field": "",
+                                    "validator": function
+                                }
+                            }
+                        },
+                        "or": [
+                        ],
+                        "and": [
+                        ]
+                })
+        """
+
+        def check_structure(struct: dict) -> [bool, str]:
+            if struct.get("type") == "str":
+                if isinstance(self.context_data, str):
+                    if struct.get("validate"):
+                        try:
+                            ch_str_valid, message = struct["validate"](self.context_data)
+                        except BaseException as err:
+                            return False, "Error in validation function execution: {}".format(err)
+                        return ch_str_valid, message
+                    return True, "OK"
+                return False, "Wrong context type: {}, expected `string`".format(type(self.context_data))
+            if struct.get("type") == "list":
+                if isinstance(self.context_data, list):
+                    if len(self.context_data) > 0:
+                        # Validate fields set
+                        pass
+                    else:
+                        return False, "Context data is empty"
+                return False, "Wrong context type: {}, expected `list`".format(type(self.context_data))
+
+        valid = False
+        if not isinstance(rules, dict):
+            return valid, "Wrong validation rules"
+
     def validate(self, rules):
         """
         Context validator based on rules
@@ -579,6 +630,13 @@ class CommandContext:
                         for itm in item.get("fields"):
                             if itm not in self.context_data[0]:
                                 list_valid = False
+                        is_present = False
+                        if item.get("some_fields"):
+                            for itm in item.get("some_fields"):
+                                if itm in self.context_data[0]:
+                                    is_present = True
+                            if not is_present:
+                                list_valid = False
                         if list_valid:
                             valid = True
             if item.get("type") == "dict":
@@ -586,6 +644,13 @@ class CommandContext:
                     dict_valid = True
                     for itm in item.get("fields"):
                         if itm not in self.context_data:
+                            dict_valid = False
+                    is_present = False
+                    if item.get("some_fields"):
+                        for itm in item.get("some_fields"):
+                            if itm in self.context_data:
+                                is_present = True
+                        if not is_present:
                             dict_valid = False
                     if dict_valid:
                         valid = True

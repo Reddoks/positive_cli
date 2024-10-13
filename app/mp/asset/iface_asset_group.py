@@ -6,10 +6,12 @@ import datetime
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from rich.progress import Progress, TaskID
+from rich.prompt import Prompt
+from rich import print as rich_print
 
 import app
 from app.app import EVENTS
-from app.core.func import fnmatch_ext, console_clear_up, get_keys_from_dict, get_string_from_fmt
+from app.core.func import fnmatch_ext, console_clear_up, get_keys_from_dict, get_string_from_fmt, getch
 from app.mp.api import MPAPIResponse
 from app.mp.func import (func_select_list_item,
                          func_get_list_by_pattern_with_childs)
@@ -399,6 +401,7 @@ class iface_MP_Group:  # noqa
         :param parent_id: parent group ID
         :param disarm: run in test mode
         """
+        from app.mp.mp.iface_mp import ID_refs
         # Check group existed on parent group level
         exist = self.get_by_name_from_parent_root(name=spec.get("name"), parent_id=parent_id)
         if exist:
@@ -408,8 +411,25 @@ class iface_MP_Group:  # noqa
             self.logger.error("Group {} exist. Can`t create".format(spec.get("name")))
             return MPAPIResponse(state=False,
                                  message="Group {} exist. Can`t create".format(spec.get("name")))
-        spec["parentId"] = parent_id
+        name = spec.get("name")
+        try:
+            id_refs = ID_refs(["user"])
+        except KeyboardInterrupt:
+            return MPAPIResponse(state=False, message="Operation interrupted")
+        except BaseException as err:
+            self.logger.error("Failed to initialize reference APIs: {}".format(err))
+            return MPAPIResponse(state=False, message="Failed to initialize reference APIs: {}".format(err))
+        spec = id_refs.replace(spec)
+        if not spec.state:
+            EVENTS.push(status="Fail", action="Create", instance="Group",
+                        name=name, instance_id="N/A",
+                        details="Failed to resolve reference IDs")
+            return spec
+        else:
+            spec = spec.message
+            spec["parentId"] = parent_id
         if not app.app.GLOBAL_DISARM and not disarm:
+            rich_print("[bright_black]Submit processing request for group {}".format(spec.get("name")))
             op_request = app.API_MP.post(app.API_MP.url_asset_group_processing, spec)
         else:
             print("Success - disarmed")
@@ -424,16 +444,30 @@ class iface_MP_Group:  # noqa
             self.logger.error(op_request.message)
             return op_request
         retries = 0
+        rich_print("[bright_black]Await processing for group {}".format(spec.get("name")))
         while True:
             retries += 1
             if retries == 5:
-                print("-- Slow API responsiveness --")
+                rich_print("[grey50]-- Slow API responsiveness --")
             if retries == 20:
                 EVENTS.push(status="Fail", action="Create", instance="Group",
                             name=spec.get("name"), instance_id=spec.get("id"),
                             details="API can`t process creation request (no response)")
-                return MPAPIResponse(state=False,
-                                     message="API can`t process creation request (no response)")
+                c = ""
+                try:
+                    rich_print("[yellow]API not processed creation request after 20 retries. "
+                               "Would you like to try again? [y/n]:\n", end="", flush=True)
+                    while not c:
+                        c = getch().lower()
+                except KeyboardInterrupt:
+                    return MPAPIResponse(state=False, message="Operation interrupted")
+                match c:
+                    case "y":
+                        rich_print("[bright_black]Retrying...")
+                        retries = 0
+                    case _:
+                        return MPAPIResponse(state=False,
+                                             message="API can`t process creation request (no response)")
             op_id = op_request.message.json()
             completion = app.API_MP.get(app.API_MP.url_asset_group_operations.format(op_id.get("operationId")))
             if not completion.state:
@@ -515,7 +549,7 @@ class iface_MP_Group:  # noqa
         from app.mp.mp.iface_mp import ID_refs
         out_list = []
         try:
-            id_refs = ID_refs(["group", "query"])
+            id_refs = ID_refs(["group", "query", "user"])
         except KeyboardInterrupt:
             return MPAPIResponse(state=False, message="Operation interrupted")
         except BaseException as err:
@@ -547,6 +581,13 @@ class iface_MP_Group:  # noqa
                     if child_list.state:
                         out_list += child_list.message
             else:
+                if "core.assetsGroups.groupNotExists.error" in info.message:
+                    EVENTS.push(action="Resolve", status="Fail",
+                                instance="Asset Group",
+                                name="N/A", instance_id=item.get("id"),
+                                details="Unable to get info for asset group with ID {}. Asset Group not found."
+                                .format(item.get("id")))
+                    continue
                 return info
         return MPAPIResponse(state=True, message=out_list)
 
